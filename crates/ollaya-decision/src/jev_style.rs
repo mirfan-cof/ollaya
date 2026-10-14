@@ -54,8 +54,6 @@ pub struct JevStyleConfig {
     pub no: u32,
     /// ` ->` verdict-slot token id (1411).
     pub arrow: u32,
-    /// `temperatures.global`; `softmax(scores / temperature)`.
-    pub temperature: f64,
 }
 
 impl JevStyleConfig {
@@ -64,12 +62,6 @@ impl JevStyleConfig {
             return Err(Error::invalid(format!(
                 "decision.json: layout {:?} is not {LAYOUT}",
                 self.layout
-            )));
-        }
-        if !(self.temperature.is_finite() && self.temperature > 0.0) {
-            return Err(Error::invalid(format!(
-                "decision.json: temperature must be finite and > 0, got {}",
-                self.temperature
             )));
         }
         Ok(())
@@ -329,7 +321,7 @@ mod tests {
     const ARROW: u32 = 1411;
 
     fn config() -> JevStyleConfig {
-        JevStyleConfig { layout: LAYOUT.into(), yes: 9542, no: 874, arrow: ARROW, temperature: 0.8278650620942867 }
+        JevStyleConfig { layout: LAYOUT.into(), yes: 9542, no: 874, arrow: ARROW }
     }
 
     /// A character-level tokenizer: one token per char, except ` ->` (the verdict slot) which is the
