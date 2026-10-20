@@ -29,8 +29,8 @@ use ollaya_decision::Questions;
 use ollaya_decision::cygnet::{self, CygnetConfig};
 use ollaya_decision::d1::{self, D1Config};
 use ollaya_decision::jebadiah::{self, JebadiahConfig};
-use ollaya_decision::jevk5::{self, JevK5Config};
 use ollaya_decision::jev_style::{self, JevStyleConfig};
+use ollaya_decision::jevk5::{self, JevK5Config};
 use ollaya_decision::llm_logits::{self, LlmLogitsConfig};
 use ollaya_decision::snap::{self, SnapConfig};
 use ollaya_decision::winnow::{self, WinnowConfig};
@@ -673,7 +673,6 @@ fn prepare(vocab: &Vocab, decision: &Value) -> Result<Layout, Error> {
 }
 
 impl LlamaModel {
-
     /// `jev-style-v1` (chaoliangUNSW/Jev-Style-2B-Decision-v3): non-causal block attention + verdict
     /// readout, mirroring the model's own jev-score-v2. The state decodes into sequence 0 once; each
     /// question copies sequence 0 -> 1, decodes its question-side blocks into sequence 1 (logits only
@@ -712,7 +711,7 @@ impl LlamaModel {
         let mut p = 0usize;
         while p < prefix.len() {
             let e = (p + jev_style::BLOCK).min(prefix.len());
-            self.decode_block(ctx, &prefix, p, e, p, 0, &[])?;
+            self.decode_block(ctx, &prefix, p..e, p, 0, &[])?;
             p = e;
         }
         // SAFETY: the context is live and locked for the whole request.
@@ -733,7 +732,7 @@ impl LlamaModel {
             }
             let mut scores = vec![f32::NAN; r.slots.len()];
             for &(a, b) in r.blocks.iter().filter(|&&(a, _)| a >= r.prefix_len) {
-                let got = self.decode_block(ctx, &r.ids, a, b, a, 1, &r.slots)?;
+                let got = self.decode_block(ctx, &r.ids, a..b, a, 1, &r.slots)?;
                 for (w, rel) in got {
                     // SAFETY: logits for `rel` are live until the next decode overwrites them.
                     let ptr = unsafe { (api.llama_get_logits_ith)(ctx.ptr.as_ptr(), rel) };
@@ -773,12 +772,12 @@ impl LlamaModel {
         &self,
         ctx: &mut Context,
         ids: &[u32],
-        lo: usize,
-        hi: usize,
+        range: std::ops::Range<usize>,
         pos0: usize,
         seq: ffi::SeqId,
         want: &[usize],
     ) -> Result<Vec<(usize, i32)>, Error> {
+        let (lo, hi) = (range.start, range.end);
         let n = hi - lo;
         if n == 0 || n > jev_style::BLOCK {
             return Err(model_error("jev-style: block length out of range"));
@@ -809,7 +808,9 @@ impl LlamaModel {
         // SAFETY: every array holds `n` entries (`seq_arr` one) and outlives the decode.
         let rc = unsafe { (self.handles.api.llama_decode)(ctx.ptr.as_ptr(), batch) };
         if rc != 0 {
-            return Err(model_error(format!("jev-style: llama_decode failed ({rc})")));
+            return Err(model_error(format!(
+                "jev-style: llama_decode failed ({rc})"
+            )));
         }
         Ok(got)
     }
@@ -1837,7 +1838,11 @@ mod tests {
             LlamaSettings {
                 n_ctx: 8192,
                 swa_full: false,
-                plan: "prefix".into()
+                plan: "prefix".into(),
+                attention_type: -1,
+                n_ubatch: 512,
+                n_seq_max: 1,
+                n_outputs_max: 0,
             }
         );
     }

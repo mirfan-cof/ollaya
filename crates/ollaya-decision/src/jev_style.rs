@@ -113,7 +113,9 @@ pub fn option_names(qid: &str, qtype: QType, crit: &Value) -> Result<Vec<String>
     match qtype {
         QType::Choice => match crit {
             Value::Object(m) if !m.is_empty() => Ok(m.keys().cloned().collect()),
-            _ => Err(bad("choice needs a non-empty object {option name: description or null}")),
+            _ => Err(bad(
+                "choice needs a non-empty object {option name: description or null}",
+            )),
         },
         QType::Score => match crit {
             Value::Array(levels) if (2..=10).contains(&levels.len()) => {
@@ -123,7 +125,9 @@ pub fn option_names(qid: &str, qtype: QType, crit: &Value) -> Result<Vec<String>
         },
         QType::Noul => match crit {
             Value::Null | Value::Object(_) => Ok(vec!["false".into(), "true".into()]),
-            _ => Err(bad("noul criteria must be null or an object {'false': ..., 'true': ...}")),
+            _ => Err(bad(
+                "noul criteria must be null or an object {'false': ..., 'true': ...}",
+            )),
         },
     }
 }
@@ -132,7 +136,9 @@ pub fn option_names(qid: &str, qtype: QType, crit: &Value) -> Result<Vec<String>
 pub fn render_options(qtype: QType, crit: &Value) -> Vec<String> {
     match qtype {
         QType::Choice => {
-            let Value::Object(m) = crit else { return Vec::new() };
+            let Value::Object(m) = crit else {
+                return Vec::new();
+            };
             m.iter()
                 .map(|(k, v)| {
                     if v.is_null() || v == &Value::String(String::new()) {
@@ -144,7 +150,9 @@ pub fn render_options(qtype: QType, crit: &Value) -> Vec<String> {
                 .collect()
         }
         QType::Score => {
-            let Value::Array(levels) = crit else { return Vec::new() };
+            let Value::Array(levels) = crit else {
+                return Vec::new();
+            };
             levels
                 .iter()
                 .enumerate()
@@ -200,11 +208,19 @@ impl JevStyleConfig {
             Some("choice") => QType::Choice,
             Some("score") => QType::Score,
             Some("noul") => QType::Noul,
-            _ => return Err(bad("unknown question type (expected choice, score or noul)".into())),
+            _ => {
+                return Err(bad(
+                    "unknown question type (expected choice, score or noul)".into(),
+                ));
+            }
         };
         let ins = match def.get("instructions") {
             Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
-            _ => return Err(bad("question text (instructions) must be a non-empty string".into())),
+            _ => {
+                return Err(bad(
+                    "question text (instructions) must be a non-empty string".into(),
+                ));
+            }
         };
         let crit = def.get("criteria").unwrap_or(&Value::Null);
         let names = option_names(qid, qtype, crit).map_err(E::from)?;
@@ -251,7 +267,8 @@ impl JevStyleConfig {
                 catalogue.extend_from_slice(&newline);
             }
             let doc_end = prefix_len + catalogue.len();
-            let mut rubric = tokenize("Judge each numbered option in the complete catalogue above:\n")?;
+            let mut rubric =
+                tokenize("Judge each numbered option in the complete catalogue above:\n")?;
             let mut rel = Vec::with_capacity(k);
             for pos in 0..k {
                 rubric.extend(tokenize(&format!("Option {}", pos + 1))?);
@@ -308,7 +325,10 @@ pub fn probabilities(scores: &[f64], temperature: f64) -> Vec<f64> {
         return Vec::new();
     }
     let max = scores.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
-    let exps: Vec<f64> = scores.iter().map(|&s| ((s - max) / temperature).exp()).collect();
+    let exps: Vec<f64> = scores
+        .iter()
+        .map(|&s| ((s - max) / temperature).exp())
+        .collect();
     let sum: f64 = exps.iter().sum();
     exps.into_iter().map(|e| e / sum).collect()
 }
@@ -321,7 +341,12 @@ mod tests {
     const ARROW: u32 = 1411;
 
     fn config() -> JevStyleConfig {
-        JevStyleConfig { layout: LAYOUT.into(), yes: 9542, no: 874, arrow: ARROW }
+        JevStyleConfig {
+            layout: LAYOUT.into(),
+            yes: 9542,
+            no: 874,
+            arrow: ARROW,
+        }
     }
 
     /// A character-level tokenizer: one token per char, except ` ->` (the verdict slot) which is the
@@ -343,7 +368,13 @@ mod tests {
 
     fn text_of(ids: &[u32]) -> String {
         ids.iter()
-            .map(|&i| if i == ARROW { " ->".to_string() } else { char::from_u32(i).unwrap().to_string() })
+            .map(|&i| {
+                if i == ARROW {
+                    " ->".to_string()
+                } else {
+                    char::from_u32(i).unwrap().to_string()
+                }
+            })
             .collect()
     }
 
@@ -380,24 +411,38 @@ mod tests {
     #[test]
     fn noul_and_score_bodies_match_reference() {
         let c = config();
-        let n = render(&c, &json!("x"), "q",
-            &json!({"type": "noul", "instructions": "Finished?"}));
+        let n = render(
+            &c,
+            &json!("x"),
+            "q",
+            &json!({"type": "noul", "instructions": "Finished?"}),
+        );
         assert_eq!(n.names, ["false", "true"]);
         assert!(text_of(&n.ids).contains(
-            "- false: no, the statement does not hold ->\n- true: yes, the statement holds ->\n"));
+            "- false: no, the statement does not hold ->\n- true: yes, the statement holds ->\n"
+        ));
 
-        let s = render(&c, &json!("x"), "q",
-            &json!({"type": "score", "instructions": "How bad?", "criteria": ["calm", "tense", 2]}));
+        let s = render(
+            &c,
+            &json!("x"),
+            "q",
+            &json!({"type": "score", "instructions": "How bad?", "criteria": ["calm", "tense", 2]}),
+        );
         assert_eq!(s.names, ["0", "1", "2"]);
-        assert!(text_of(&s.ids).contains(
-            "- level 0: calm ->\n- level 1: tense ->\n- level 2: 2 ->\n"));
+        assert!(
+            text_of(&s.ids).contains("- level 0: calm ->\n- level 1: tense ->\n- level 2: 2 ->\n")
+        );
     }
 
     #[test]
     fn state_is_serialized_like_json_dumps() {
         let c = config();
-        let r = render(&c, &json!({"n": 1.5, "msg": "hi"}), "q",
-            &json!({"type": "noul", "instructions": "ok?"}));
+        let r = render(
+            &c,
+            &json!({"n": 1.5, "msg": "hi"}),
+            "q",
+            &json!({"type": "noul", "instructions": "ok?"}),
+        );
         assert!(text_of(&r.ids).starts_with("State:\n{\"n\": 1.5, \"msg\": \"hi\"}\n\n"));
     }
 
@@ -406,10 +451,19 @@ mod tests {
         let c = config();
         // Many long options so the short block exceeds BLOCK tokens.
         let crit: serde_json::Map<String, Value> = (0..200)
-            .map(|i| (format!("option_number_{i:03}_with_a_fairly_long_name"), Value::Null))
+            .map(|i| {
+                (
+                    format!("option_number_{i:03}_with_a_fairly_long_name"),
+                    Value::Null,
+                )
+            })
             .collect();
-        let r = render(&c, &json!("s"), "q",
-            &json!({"type": "choice", "instructions": "pick", "criteria": crit}));
+        let r = render(
+            &c,
+            &json!("s"),
+            "q",
+            &json!({"type": "choice", "instructions": "pick", "criteria": crit}),
+        );
         assert!(r.catalogue_overflow);
         assert_eq!(r.slots.len(), 200);
         let t = text_of(&r.ids);
@@ -424,8 +478,12 @@ mod tests {
     #[test]
     fn blocks_tile_the_whole_input() {
         let c = config();
-        let r = render(&c, &json!("hello"), "q",
-            &json!({"type": "noul", "instructions": "ok?"}));
+        let r = render(
+            &c,
+            &json!("hello"),
+            "q",
+            &json!({"type": "noul", "instructions": "ok?"}),
+        );
         assert_eq!(r.blocks.first().unwrap().0, 0);
         assert_eq!(r.blocks.last().unwrap().1, r.ids.len());
         for w in r.blocks.windows(2) {
