@@ -77,6 +77,10 @@ pub struct LlamaSettings {
     pub n_seq_max: u32,
     #[serde(default)]
     pub n_outputs_max: u32,
+    /// A unified KV cache: one shared pool so each sequence can use the whole context
+    /// (jev-style copies the prefix to sequence 1). The default splits it across sequences.
+    #[serde(default)]
+    pub kv_unified: bool,
 }
 
 fn attn_causal() -> i32 {
@@ -588,6 +592,23 @@ fn prepare(vocab: &Vocab, decision: &Value) -> Result<Layout, Error> {
                     )));
                 }
             }
+            // The context must be the non-causal, wide-ubatch one jev-score-v2 needs.
+            let llama = &decision["llama"];
+            if llama.get("attention_type").and_then(Value::as_i64) != Some(1) {
+                return Err(model_error(
+                    "jev-style: decision.json llama.attention_type must be 1 (non-causal block \
+                     attention); a causal context would score every option against the wrong \
+                     attention",
+                ));
+            }
+            let n_ubatch = llama.get("n_ubatch").and_then(Value::as_u64).unwrap_or(512);
+            if n_ubatch < jev_style::BLOCK as u64 {
+                return Err(model_error(format!(
+                    "jev-style: decision.json llama.n_ubatch is {n_ubatch}; it must be at least \
+                     {} so a full attention block fits one ubatch",
+                    jev_style::BLOCK
+                )));
+            }
             Layout::JevStyle(cfg)
         }
         Some(jebadiah::LAYOUT) => {
@@ -685,10 +706,7 @@ impl LlamaModel {
         cfg: &JevStyleConfig,
     ) -> Result<Output, Error> {
         let api = self.handles.api;
-        let qmap = questions
-            .as_object()
-            .filter(|m| !m.is_empty())
-            .ok_or_else(|| model_error("questions must contain at least one named question"))?;
+        let parsed = ollaya_decision::parse_questions(questions)?;
         let vocab = &self.vocab;
         let mut tok = |t: &str| {
             vocab
@@ -696,10 +714,27 @@ impl LlamaModel {
                 .map(|v| v.into_iter().map(|x| x as u32).collect::<Vec<u32>>())
         };
         let prefix = cfg.state_prefix(state, &mut tok)?;
-        let rendered: Vec<(&String, jev_style::Rendered)> = qmap
+        let rendered: Vec<(&String, jev_style::Rendered)> = parsed
             .iter()
-            .map(|(qid, def)| Ok((qid, cfg.render::<Error>(qid, def, &prefix, &mut tok)?)))
+            .map(|(qid, q)| Ok((qid, cfg.render::<Error>(qid, q, &prefix, &mut tok)?)))
             .collect::<Result<_, Error>>()?;
+        // Reject an input the context cannot hold, before any decode (a clean 422, not a 500
+        // from inside llama_decode). A unified KV cache lets each sequence use the whole context.
+        let capacity = if self.settings.kv_unified {
+            self.settings.n_ctx
+        } else {
+            self.settings.n_ctx / (self.settings.n_seq_max.max(1) as usize)
+        };
+        for (qid, r) in &rendered {
+            if r.ids.len() > capacity {
+                return Err(ollaya_decision::Error::invalid(format!(
+                    "question {qid:?}: the rendered input is {} tokens, over the model's \
+                     {capacity}-token context; shorten the state, question or options",
+                    r.ids.len()
+                ))
+                .into());
+            }
+        }
 
         let mut guard = self
             .handles
@@ -711,7 +746,7 @@ impl LlamaModel {
         let mut p = 0usize;
         while p < prefix.len() {
             let e = (p + jev_style::BLOCK).min(prefix.len());
-            self.decode_block(ctx, &prefix, p..e, p, 0, &[])?;
+            self.decode_block(ctx, &prefix[p..e], p, 0, &[])?;
             p = e;
         }
         // SAFETY: the context is live and locked for the whole request.
@@ -732,7 +767,7 @@ impl LlamaModel {
             }
             let mut scores = vec![f32::NAN; r.slots.len()];
             for &(a, b) in r.blocks.iter().filter(|&&(a, _)| a >= r.prefix_len) {
-                let got = self.decode_block(ctx, &r.ids, a..b, a, 1, &r.slots)?;
+                let got = self.decode_block(ctx, &r.ids[a..b], a, 1, &r.slots)?;
                 for (w, rel) in got {
                     // SAFETY: logits for `rel` are live until the next decode overwrites them.
                     let ptr = unsafe { (api.llama_get_logits_ith)(ctx.ptr.as_ptr(), rel) };
@@ -752,6 +787,11 @@ impl LlamaModel {
             }
             // SAFETY: the memory belongs to this context.
             unsafe { (api.llama_memory_seq_rm)(ctx.memory, 1, -1, -1) };
+            if scores.iter().any(|s| !s.is_finite()) {
+                return Err(model_error(
+                    "jev-style: a verdict slot produced a non-finite score (NaN or infinite)",
+                ));
+            }
             out.push(QuestionOutput {
                 logits: scores,
                 act_logits: None,
@@ -771,18 +811,18 @@ impl LlamaModel {
     fn decode_block(
         &self,
         ctx: &mut Context,
-        ids: &[u32],
-        range: std::ops::Range<usize>,
+        block: &[u32],
         pos0: usize,
         seq: ffi::SeqId,
         want: &[usize],
     ) -> Result<Vec<(usize, i32)>, Error> {
-        let (lo, hi) = (range.start, range.end);
-        let n = hi - lo;
-        if n == 0 || n > jev_style::BLOCK {
-            return Err(model_error("jev-style: block length out of range"));
+        let n = block.len();
+        if n == 0 || n as u32 > self.settings.n_ubatch {
+            return Err(model_error(
+                "jev-style: block length exceeds the context ubatch",
+            ));
         }
-        let mut token: Vec<Token> = ids[lo..hi].iter().map(|&x| x as Token).collect();
+        let mut token: Vec<Token> = block.iter().map(|&x| x as Token).collect();
         let mut pos: Vec<ffi::Pos> = (0..n).map(|k| (pos0 + k) as ffi::Pos).collect();
         let mut n_seq_id = vec![1i32; n];
         let mut seq_arr = [seq];
@@ -1673,10 +1713,16 @@ fn load_on(
         cp.attention_type = settings.attention_type;
         cp.n_outputs_max = settings.n_outputs_max;
         cp.n_outputs_max_per_seq = settings.n_outputs_max.max(1);
+        // Flash attention stays on auto (-1) by default. The non-causal block model
+        // (jev-style, attention_type 1) follows jev-score-v2: off on the CPU, where the
+        // author measured a precision loss, and auto on a GPU.
+        if settings.attention_type == 1 && device.is_none() {
+            cp.flash_attn_type = 0; // LLAMA_FLASH_ATTN_TYPE_DISABLED
+        }
         cp.n_threads = threads;
         cp.n_threads_batch = threads;
         cp.swa_full = settings.swa_full;
-        cp.kv_unified = false;
+        cp.kv_unified = settings.kv_unified;
         cp.no_perf = true;
         let ctx = (api.llama_init_from_model)(model.as_ptr(), cp);
         if ctx.is_null() {
@@ -1843,6 +1889,7 @@ mod tests {
                 n_ubatch: 512,
                 n_seq_max: 1,
                 n_outputs_max: 0,
+                kv_unified: false,
             }
         );
     }

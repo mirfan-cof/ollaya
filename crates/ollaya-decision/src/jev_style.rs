@@ -35,7 +35,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::Error;
-use crate::question::QType;
+use crate::question::{Criteria, QType, Question};
 
 pub const LAYOUT: &str = "jev-style-v1";
 /// Attention block size (a processing unit, not a content limit).
@@ -98,82 +98,14 @@ pub fn serialize_state(state: &Value) -> String {
     }
 }
 
-/// `_criterion`: a string verbatim; any other JSON value as `json.dumps(v, ensure_ascii=False)`
-/// (default separators `", "` / `": "`).
-fn criterion(value: &Value) -> String {
-    match value {
-        Value::String(s) => s.clone(),
-        v => crate::pyjson::dumps(v, false),
-    }
-}
-
-/// The option identifiers in canonical (probability) order, validating the question.
-pub fn option_names(qid: &str, qtype: QType, crit: &Value) -> Result<Vec<String>, Error> {
-    let bad = |m: &str| Error::invalid(format!("question {qid:?}: {m}"));
-    match qtype {
-        QType::Choice => match crit {
-            Value::Object(m) if !m.is_empty() => Ok(m.keys().cloned().collect()),
-            _ => Err(bad(
-                "choice needs a non-empty object {option name: description or null}",
-            )),
-        },
-        QType::Score => match crit {
-            Value::Array(levels) if (2..=10).contains(&levels.len()) => {
-                Ok((0..levels.len()).map(|i| i.to_string()).collect())
-            }
-            _ => Err(bad("score needs a list of 2..10 level descriptions")),
-        },
-        QType::Noul => match crit {
-            Value::Null | Value::Object(_) => Ok(vec!["false".into(), "true".into()]),
-            _ => Err(bad(
-                "noul criteria must be null or an object {'false': ..., 'true': ...}",
-            )),
-        },
-    }
-}
-
-/// The option bodies in canonical order (`render_options`), without the `- ` / ` ->` wrapping.
-pub fn render_options(qtype: QType, crit: &Value) -> Vec<String> {
-    match qtype {
-        QType::Choice => {
-            let Value::Object(m) = crit else {
-                return Vec::new();
-            };
-            m.iter()
-                .map(|(k, v)| {
-                    if v.is_null() || v == &Value::String(String::new()) {
-                        k.clone()
-                    } else {
-                        format!("{k}: {}", criterion(v))
-                    }
-                })
-                .collect()
-        }
-        QType::Score => {
-            let Value::Array(levels) = crit else {
-                return Vec::new();
-            };
-            levels
-                .iter()
-                .enumerate()
-                .map(|(i, c)| format!("level {i}: {}", criterion(c)))
-                .collect()
-        }
-        QType::Noul => {
-            let empty = serde_json::Map::new();
-            let m = crit.as_object().unwrap_or(&empty);
-            let body = |k: &str, default: &str| {
-                let text = match m.get(k) {
-                    Some(v) if !(v.is_null() || v == &Value::String(String::new())) => criterion(v),
-                    _ => default.to_owned(),
-                };
-                format!("{k}: {text}")
-            };
-            vec![
-                body("false", "no, the statement does not hold"),
-                body("true", "yes, the statement holds"),
-            ]
-        }
+/// Canonical option identifiers in probability order: a choice's labels, a score's level
+/// indices, or `["false", "true"]` for a noul. The shared parser ([`crate::question::Question`])
+/// has already validated and ordered them (and accepts a choice as a list of labels).
+fn canonical_names(q: &Question) -> Vec<String> {
+    match &q.criteria {
+        Criteria::Choice(m) => m.keys().cloned().collect(),
+        Criteria::Score(levels) => (0..levels.len()).map(|i| i.to_string()).collect(),
+        Criteria::Noul { .. } => vec!["false".into(), "true".into()],
     }
 }
 
@@ -196,25 +128,14 @@ impl JevStyleConfig {
     pub fn render<E: From<Error>>(
         &self,
         qid: &str,
-        def: &Value,
+        q: &Question,
         state_prefix: &[u32],
         mut tokenize: impl FnMut(&str) -> Result<Vec<u32>, E>,
     ) -> Result<Rendered, E> {
         let bad = |m: String| E::from(Error::invalid(format!("question {qid:?}: {m}")));
-        let def = def
-            .as_object()
-            .ok_or_else(|| bad("invalid named question".into()))?;
-        let qtype = match def.get("type").and_then(Value::as_str) {
-            Some("choice") => QType::Choice,
-            Some("score") => QType::Score,
-            Some("noul") => QType::Noul,
-            _ => {
-                return Err(bad(
-                    "unknown question type (expected choice, score or noul)".into(),
-                ));
-            }
-        };
-        let ins = match def.get("instructions") {
+        // The shared parser accepts structured instructions (json.dumps) and 1..N score levels;
+        // jev-style keeps the author's stricter limits: a non-empty string and 2..=10 levels.
+        let ins = match q.definition.get("instructions") {
             Some(Value::String(s)) if !s.trim().is_empty() => s.clone(),
             _ => {
                 return Err(bad(
@@ -222,9 +143,12 @@ impl JevStyleConfig {
                 ));
             }
         };
-        let crit = def.get("criteria").unwrap_or(&Value::Null);
-        let names = option_names(qid, qtype, crit).map_err(E::from)?;
-        let bodies = render_options(qtype, crit);
+        if q.qtype == QType::Score && !(2..=10).contains(&q.num_options()) {
+            return Err(bad("score needs a list of 2..10 level descriptions".into()));
+        }
+        let qtype = q.qtype;
+        let names = canonical_names(q);
+        let bodies = q.render_options();
 
         let head = tokenize(&format!("Question [{}]: {ins}\nOptions:\n", qtype.name()))?;
         let opts: Vec<Vec<u32>> = bodies
@@ -380,7 +304,8 @@ mod tests {
 
     fn render(c: &JevStyleConfig, state: &Value, qid: &str, def: &Value) -> Rendered {
         let prefix = c.state_prefix(state, tok).unwrap();
-        c.render::<Error>(qid, def, &prefix, tok).unwrap()
+        let q = crate::question::Question::parse(qid, def).unwrap();
+        c.render::<Error>(qid, &q, &prefix, tok).unwrap()
     }
 
     #[test]

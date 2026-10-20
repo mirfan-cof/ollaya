@@ -386,7 +386,8 @@ class JevStyle:
         }
         self.plan = "cold"
         # A non-causal context, logits read at the verdict slots (see run_jev_style).
-        self.llama_extra = {"attention_type": 1, "n_ubatch": 2048, "n_seq_max": 2, "n_outputs_max": 512}
+        self.llama_extra = {"n_ctx": 32768, "attention_type": 1, "n_ubatch": 2048, "n_seq_max": 2,
+                            "n_outputs_max": 512, "kv_unified": True}
 
     def encode(self, state, questions):
         raise NotImplementedError("jev-style logit-parity goldens need the author's jev-score-v2")

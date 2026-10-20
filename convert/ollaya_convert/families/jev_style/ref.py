@@ -48,8 +48,11 @@ def option_names(question):
     if not isinstance(ins, str) or not ins.strip():
         raise QuestionError("question text (instructions) must be a non-empty string")
     if t == "choice":
+        if isinstance(crit, list) and crit and all(isinstance(c, str) for c in crit):
+            return list(dict.fromkeys(crit))  # a list of labels -> {label: None}; dupes collapse
         if not isinstance(crit, dict) or not crit:
-            raise QuestionError("choice needs a non-empty object {option name: description or null}")
+            raise QuestionError("choice needs a non-empty object {option name: description or null} "
+                                "or a list of labels")
         return [str(k) for k in crit]
     if t == "score":
         if not isinstance(crit, list) or not 2 <= len(crit) <= 10:
@@ -77,10 +80,12 @@ def render_options(question):
     """Option bodies in canonical order (without the `- ` / ` ->` wrapping)."""
     t, crit = question["type"], question.get("criteria")
     if t == "choice":
+        if isinstance(crit, list):
+            return list(dict.fromkeys(str(c) for c in crit))  # labels; dupes collapse
         return [k if v is None or v == "" else "%s: %s" % (k, _criterion(v)) for k, v in crit.items()]
     if t == "score":
         return ["level %d: %s" % (i, _criterion(c)) for i, c in enumerate(crit)]
-    crit = crit or {}
+    crit = {str(k).lower(): v for k, v in crit.items()} if isinstance(crit, dict) else {}
     false_c, true_c = crit.get("false"), crit.get("true")
     return ["false: " + (_criterion(false_c) if false_c not in (None, "") else "no, the statement does not hold"),
             "true: " + (_criterion(true_c) if true_c not in (None, "") else "yes, the statement holds")]
