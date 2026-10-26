@@ -1064,9 +1064,11 @@ CATALOG = {
                                "2B", ["en"], tokenizer="tokenizer/tokenizer.json"),
         },
         "aliases": {"latest": "2b"},
-        "parity": "Prompt parity: the render matches the model's own jev_style_decision_gguf.py "
-                  "(ollaya_convert.families.jev_style.ref). Logit parity vs the author's jev-score-v2 is "
-                  "pending (non-causal readout; see the PR).",
+        "parity": "Ollaya's runner matches the author's own jev-score-v2 (unchanged, on the pinned llama.cpp build "
+                  "b11146) on the same GGUF and device: 582 questions per file, identical token ids, verdict slots "
+                  "and attention blocks, every decision the same and verdict scores within 4.4e-16 (Q8_0 and "
+                  "Q4_K_M, x86-64 CPU, a community machine). The render is identical to the author's "
+                  "jev_style_decision_gguf.py on the author's tokenizer.",
     },
     "decima": {
         "namespace": "library",
