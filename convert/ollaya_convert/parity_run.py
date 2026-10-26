@@ -40,7 +40,7 @@ PROTOCOL = {
     "runner": "convert/ollaya_convert/parity_run.py with crates/ollaya-runner/examples/parity_<family>.rs",
 }
 # Families that run on another family's engine, and so on its parity example.
-EXAMPLE = {"d3": "pplx"}
+EXAMPLE = {"d3": "pplx", "decision2": "decision"}
 # GGUF families whose example prints a `record:` line. Their goldens are per device, in the export directory
 # (`goldens-<device>.jsonl`, from the family's goldens.py), and the export is pinned by the GGUF's sha256.
 GGUF_RECORDED = {"jev-style"}
