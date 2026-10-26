@@ -17,7 +17,9 @@ import urllib.request
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from ollaya_convert.families.jev_style import goldens, ref
+HAVE_DEPS = all(importlib.util.find_spec(m) for m in ("numpy", "tokenizers"))
+if HAVE_DEPS:  # goldens.py imports numpy; CI's packaging job has no ML dependencies
+    from ollaya_convert.families.jev_style import goldens, ref
 
 REPO = "https://huggingface.co/chaoliangUNSW/Jev-Style-2B-Decision-v3-GGUF/resolve/" \
        "283b9eb7903aeb184b16d49ab8f38b256f4afcb3/"
@@ -51,6 +53,7 @@ def fetch(name):
     return path
 
 
+@unittest.skipUnless(HAVE_DEPS, "needs the convert environment (numpy, tokenizers)")
 class RenderParity(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
