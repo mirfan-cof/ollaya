@@ -109,13 +109,18 @@ of several attention blocks (6,214 tokens), a catalogue overflow of 150 options,
 `parity_jev_style`, requires identical token ids, verdict slots, attention blocks and option names, every
 decision the same and every verdict score within 1e-3 of jev-score-v2's.
 
-Measured on `community-epyc-milan` (an AMD EPYC Milan cloud VM, 8 vCPUs, the AVX2 CPU backend of the
-b11146 libraries), 2026-10-26, Ollaya at `cf1fa64`, with `parity_run` (`results/runs/2026-10-26-parity-communityepycmilan-cpu.json`):
+Measured with `parity_run` on 2026-10-26: the CPU on `community-epyc-milan` (an AMD EPYC Milan cloud VM,
+8 vCPUs, the AVX2 CPU backend of the b11146 libraries), Ollaya at `cf1fa64`
+(`results/runs/2026-10-26-parity-communityepycmilan-cpu.json`); CUDA on `rtx-5090` (the CUDA 13.4 backend of
+the b11146 libraries, goldens from jev-score-v2 on the same GPU), Ollaya at `ece7118`
+(`results/runs/2026-10-26-parity-rtx5090-cuda.json`):
 
 | Tag | File | Device | Questions | Decisions | Verdict scores max | Probabilities max |
 |---|---|---|---|---|---|---|
 | `2b` | Q8_0 | CPU (x86-64) | 582 | 582/582 | 4.4e-16 | 0 |
 | `2b-q4_k_m` | Q4_K_M | CPU (x86-64) | 582 | 582/582 | 4.4e-16 | 0 |
+| `2b` | Q8_0 | CUDA (RTX 5090) | 582 | 582/582 | 4.4e-16 | 0 |
+| `2b-q4_k_m` | Q4_K_M | CUDA (RTX 5090) | 582 | 582/582 | 4.4e-16 | 0 |
 
 - **Identical encodings.** 141 records: 124 scored requests, 582 questions, among them 2 in the overflow
   form (up to 150 options), 4 with a state of several blocks, and one input of exactly 25,600 tokens.
@@ -123,7 +128,7 @@ b11146 libraries), 2026-10-26, Ollaya at `cf1fa64`, with `parity_run` (`results/
   3 decoder cases whose score legend is an object, and the 25,601-token input.
 - **Same scores.** On the same libraries and device the runner's scores are jev-score-v2's to the last
   bit; the 4.4e-16 is the float64 rounding of the stored scores.
-- **Not run yet.** CUDA (the RTX 5090 run before merging), Metal and Windows; latency.
+- **Not run yet.** Metal and Windows; latency.
 
 What the files are worth against the author's PyTorch fp32 reference is the author's measurement (the
 GGUF card, 1,000 development rows): Q8_0 99.7 % top-1 agreement, maximum |Δp| 0.033, 43/43 on the long

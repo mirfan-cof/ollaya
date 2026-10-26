@@ -1106,8 +1106,8 @@ CATALOG = {
         "parity": "Ollaya's runner matches the author's own jev-score-v2 (unchanged, on the pinned llama.cpp build "
                   "b11146) on the same GGUF and device: 582 questions per file, identical token ids, verdict slots "
                   "and attention blocks, every decision the same and verdict scores within 4.4e-16 (Q8_0 and "
-                  "Q4_K_M, x86-64 CPU, a community machine). The render is identical to the author's "
-                  "jev_style_decision_gguf.py on the author's tokenizer.",
+                  "Q4_K_M; x86-64 CPU on a community machine, and CUDA on an RTX 5090). The render is identical "
+                  "to the author's jev_style_decision_gguf.py on the author's tokenizer.",
     },
     "decima": {
         "namespace": "library",
