@@ -17,7 +17,7 @@ use std::io::IsTerminal;
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, FromArgMatches, Parser, Subcommand};
 use ollaya_server::config::VERSION;
 
 #[derive(Parser)]
@@ -137,10 +137,10 @@ enum Command {
         /// The arch layer, for the MLX engine
         #[arg(long)]
         arch: Option<PathBuf>,
-        /// The weights file, for the MLX engine
+        /// The weights files, for the MLX engine (one `--weights` per file, in the arch layer's order)
         #[arg(long)]
-        weights: Option<PathBuf>,
-        /// auto, cpu, cuda, cuda:<n> or metal
+        weights: Vec<PathBuf>,
+        /// auto, cpu, cuda, cuda:<n>, rocm, rocm:<n>, vulkan, vulkan:<n> or metal
         #[arg(long, default_value = "auto")]
         device: ollaya_runner::server::DeviceRequest,
         #[arg(long)]
@@ -195,10 +195,26 @@ async fn version() {
     }
 }
 
+/// `Cli::parse`, plus the questions of `run --ask`, which need the flags' order.
+fn parse_cli<I, T>(args: I) -> Result<Cli, clap::Error>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<std::ffi::OsString> + Clone,
+{
+    let matches = Cli::command().try_get_matches_from(args)?;
+    let mut cli = Cli::from_arg_matches(&matches)?;
+    if let (Some(Command::Run(r)), Some(("run", m))) = (&mut cli.command, matches.subcommand()) {
+        r.asked = run::asked_questions(m).map_err(|e| {
+            Cli::command().error(clap::error::ErrorKind::ValueValidation, e.to_string())
+        })?;
+    }
+    Ok(cli)
+}
+
 fn main() -> Result<()> {
     // SAFETY: the first statement of `main`; no other thread exists yet.
     unsafe { ollaya_runner::prepare_process() };
-    let cli = Cli::parse();
+    let cli = parse_cli(std::env::args_os()).unwrap_or_else(|e| e.exit());
     let rt = tokio::runtime::Runtime::new()?;
     if cli.version {
         rt.block_on(version());
@@ -253,8 +269,11 @@ fn main() -> Result<()> {
             let cuda = ollaya_server::launch::cuda_dir(&exe)
                 .map(|d| d.join(ollaya_runner::llama::CUDA_BACKEND))
                 .filter(|p| p.is_file());
+            let rocm = ollaya_server::launch::rocm_dir(&exe)
+                .map(|d| d.join(ollaya_runner::llama::ROCM_BACKEND))
+                .filter(|p| p.is_file());
             let found =
-                ollaya_runner::llama::probe(&ollaya_runner::llama::Libraries { dir, cuda })?;
+                ollaya_runner::llama::probe(&ollaya_runner::llama::Libraries { dir, cuda, rocm })?;
             println!("{}", serde_json::to_string_pretty(&found)?);
         }
         Command::Serve => {
@@ -361,7 +380,7 @@ mod tests {
     use super::*;
 
     fn parse(args: &[&str]) -> Cli {
-        Cli::try_parse_from(std::iter::once("ollaya").chain(args.iter().copied()))
+        parse_cli(std::iter::once("ollaya").chain(args.iter().copied()))
             .unwrap_or_else(|e| panic!("{args:?}: {e}"))
     }
 
@@ -468,9 +487,59 @@ mod tests {
     }
 
     #[test]
+    fn ask_builds_questions_in_command_line_order() {
+        let Some(Command::Run(r)) = parse(&[
+            "run",
+            "kev",
+            "--ask",
+            "Refund?",
+            "--ask",
+            "Which team?",
+            "--choice",
+            "billing=charges",
+            "--choice",
+            "tech",
+            "--ask",
+            "How upset?",
+            "--level",
+            "calm",
+            "--level",
+            "angry",
+            "I was charged twice",
+        ])
+        .command
+        else {
+            panic!()
+        };
+        assert_eq!(r.state.join(" "), "I was charged twice");
+        let asked = serde_json::to_string(&r.asked.unwrap()).unwrap();
+        let want = serde_json::json!({
+            "q1": {"type": "noul", "instructions": "Refund?"},
+            "q2": {"type": "choice", "instructions": "Which team?",
+                   "criteria": {"billing": "charges", "tech": null}},
+            "q3": {"type": "score", "instructions": "How upset?", "criteria": ["calm", "angry"]},
+        });
+        let want: ollaya_api::Questions = serde_json::from_value(want).unwrap();
+        assert_eq!(asked, serde_json::to_string(&want).unwrap());
+
+        let bad = |args: &[&str]| {
+            parse_cli(std::iter::once("ollaya").chain(args.iter().copied())).is_err()
+        };
+        assert!(bad(&["run", "kev", "--choice", "a", "--ask", "Q?"]));
+        assert!(bad(&[
+            "run", "kev", "--ask", "Q?", "--choice", "a", "--level", "b"
+        ]));
+        assert!(bad(&[
+            "run", "kev", "--ask", "Q?", "--choice", "a", "--choice", "a"
+        ]));
+        assert!(bad(&["run", "kev", "--ask", "Q?", "--preset", "triage"]));
+        assert!(bad(&["run", "kev", "--level", "low"]));
+    }
+
+    #[test]
     fn rejects_bad_arguments() {
         let bad = |args: &[&str]| {
-            Cli::try_parse_from(std::iter::once("ollaya").chain(args.iter().copied())).is_err()
+            parse_cli(std::iter::once("ollaya").chain(args.iter().copied())).is_err()
         };
         assert!(bad(&["run"]));
         // Any preset name parses: custom presets are resolved by the daemon at run time.

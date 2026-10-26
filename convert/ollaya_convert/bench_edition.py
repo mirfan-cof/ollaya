@@ -3,7 +3,13 @@
     python -m ollaya_convert.bench_edition --raw OUT_DIR --public-data PUBLIC_DIR --typed-data typed.jsonl \
         --edition 2026.10 --date 2026-10-14 --machine rtx-5090 --models winnow:e4b kev:4b ... --results ../results
 
-OUT_DIR is what the edition's run script writes on the bench machine:
+With --update RELEASE, the runs go into the existing edition instead (ADR 0009, a rolling edition): only the models
+a release changed are measured (`bench_plan`), their run files are added to the edition's runs, where a later run's
+row replaces an earlier one of the same model, their scores replace the old ones, `trained_on` is TRAINED_ON as it is
+now, and `updates` records the release (once: a second update of the same release joins the first).
+`-fp16` tags are not added to the edition's models: the site shows them under their base tag, unranked.
+
+OUT_DIR is what `bench_run` writes on the bench machine:
 
     latency-<machine>-cuda.json, latency-<machine>-cpu.json    bench_latency.py, with --memory
     typed/<model>/rows.jsonl                                   bench_typed.py
@@ -15,6 +21,9 @@ OUT_DIR is what the edition's run script writes on the bench machine:
     runs/<date>-public-benchmark-<machine>-cuda.json Bespoke Labs' public benchmark, as earlier runs
     runs/<date>-typed-decisions-<machine>-cuda.json  typed-decisions
     editions/<edition>.json                          the edition: its runs, models, score and flags
+
+With --label, every run file name ends in `-<label>` (`<date>-latency-<machine>-cuda-<label>.json`), so a second
+release measured the same day does not overwrite the first one's files.
 
 The edition score of a model is the mean, over the 13 public subsets and typed-decisions (14 tasks, equal
 weight), of the chance-corrected accuracy (accuracy - chance) / (1 - chance), where chance is the mean of
@@ -39,9 +48,21 @@ SEED = 20261014
 # Models trained on the train split of a task: their score on it is not a held-out measurement.
 TRAINED_ON = {
     "laya:typed-decisions": ["typed-decisions"],
+    "largha:150m": ["typed-decisions"],
     "jeb:4b": ["typed-decisions"],
-    "jeb:9b": ["typed-decisions"],
-    "jeb:27b": ["typed-decisions"],
+    # jeb:9b and jeb:27b are v2.1, whose 90 training sources (the card's table) add civil_comments, HelpSteer2 and
+    # MASSIVE intents, parallel across languages, to typed-decisions.
+    **{"jeb:" + t: ["typed-decisions", "civil_comments", "helpsteer2", "massive-en-US", "massive-de-DE"]
+       for t in ("9b", "27b")},
+    # The in-domain coba tags saw the train splits of ten public tasks (DATA_SOURCES.tsv, indomain/*). MASSIVE
+    # is parallel across languages, so its German subset is not held out either.
+    **{"coba:" + t: ["vitaminc-dev", "massive-en-US", "massive-de-DE", "boolq", "squad2", "paws", "multinli",
+                     "civil_comments", "aegis2", "helpsteer2", "pubmedqa"]
+       for t in ("400m-ternary", "150m-ternary", "68m-ternary")},
+    # Jeeves v2's export.json sources: typed_decisions, boolq, mnli, paws, and decider_* sets built from
+    # civil_comments, HelpSteer2 and MASSIVE intents.
+    "jeeves:9b": ["typed-decisions", "boolq", "multinli", "paws", "civil_comments", "helpsteer2", "massive-en-US",
+                  "massive-de-DE"],
 }
 
 
@@ -152,12 +173,17 @@ def main():
     ap.add_argument("--machine", required=True)
     ap.add_argument("--models", nargs="+", required=True)
     ap.add_argument("--results", required=True)
+    ap.add_argument("--update", metavar="RELEASE", help="add these runs to the existing edition (ADR 0009)")
+    ap.add_argument("--label", default="", help="appended to the run file names (a second update on the same date)")
+    ap.add_argument("--note", default="", help="added to the public and typed run files' note (for example, rows "
+                    "carried from an earlier build of the same graphs)")
     a = ap.parse_args()
     raw, public_data, results = Path(a.raw), Path(a.public_data), Path(a.results)
     typed_data = [json.loads(line) for line in open(a.typed_data, encoding="utf-8") if line.strip()]
     (results / "runs").mkdir(parents=True, exist_ok=True)
     (results / "editions").mkdir(parents=True, exist_ok=True)
     stem = "%s-%%s-%s" % (a.date, a.machine.replace("-", ""))
+    label = "-" + a.label if a.label else ""
     files = []
 
     # Latency: the files as bench_latency.py wrote them, with the edition named.
@@ -172,7 +198,7 @@ def main():
         for r in run["results"]:
             if r.get("digest"):
                 digests.setdefault(r["model"], r["digest"])
-        name = "%s-%s.json" % (stem % "latency", device)
+        name = "%s-%s%s.json" % (stem % "latency", device, label)
         json.dump(run, open(results / "runs" / name, "w", encoding="utf-8"), indent=1)
         files.append(name)
 
@@ -225,16 +251,16 @@ def main():
 
     common = {"schema": 1, "date": a.date, "edition": a.edition, "machine": a.machine, "device": "cuda"}
     if public_results:
-        name = "%s-cuda.json" % (stem % "public-benchmark")
+        name = "%s-cuda%s.json" % (stem % "public-benchmark", label)
         prev = json.load(open(results / "runs" / "2026-09-30-public-benchmark-rtx5090-cuda.json", encoding="utf-8"))
         json.dump({**common, "suite": "public-benchmark", "servers": {"ollaya": version},
-                   "protocol": prev["protocol"], "note": "Ollaya Bench edition %s." % a.edition,
+                   "protocol": prev["protocol"], "note": ("Ollaya Bench edition %s. %s" % (a.edition, a.note)).strip(),
                    "results": sorted(public_results, key=lambda r: -r["macro_accuracy"])},
                   open(results / "runs" / name, "w", encoding="utf-8"), indent=1)
         files.append(name)
     if typed_results:
-        name = "%s-cuda.json" % (stem % "typed-decisions")
-        json.dump({**common, "suite": "typed-decisions", "ollaya": version, "protocol": {
+        name = "%s-cuda%s.json" % (stem % "typed-decisions", label)
+        json.dump({**common, "suite": "typed-decisions", "ollaya": version, **({"note": a.note} if a.note else {}), "protocol": {
             "benchmark": "typed-decisions test split: 400 JSON states from four workflows, five typed questions each "
                          "(2,000 questions: 600 choice, 600 noul, 800 score)",
             "source": "https://huggingface.co/datasets/LocalLLaMA/typed-decisions",
@@ -247,6 +273,9 @@ def main():
             open(results / "runs" / name, "w", encoding="utf-8"), indent=1)
         files.append(name)
 
+    if a.update:
+        update(results / "editions" / ("%s.json" % a.edition), a.update, a.date, files, a.models, scores)
+        return
     edition = {
         "schema": 1, "id": a.edition, "title": "Ollaya Bench %s" % a.edition, "date": a.date, "ollaya": version,
         "machine": a.machine, "runs": files, "models": a.models,
@@ -262,6 +291,31 @@ def main():
     }
     json.dump(edition, open(results / "editions" / ("%s.json" % a.edition), "w", encoding="utf-8"), indent=1)
     print("wrote", ", ".join(files), "and editions/%s.json" % a.edition)
+
+
+def merge_update(edition, release, date, files, models, scores):
+    """`edition` with one release's runs, models and scores added (a rolling update)."""
+    edition["runs"] += [f for f in files if f not in edition["runs"]]
+    edition["models"] += [m for m in models if m not in edition["models"] and not m.endswith("-fp16")]
+    new = {s["model"] for s in scores}
+    edition["score"]["results"] = sorted([r for r in edition["score"]["results"] if r["model"] not in new] + scores,
+                                         key=lambda r: -r["score"])
+    updates = edition.setdefault("updates", [])
+    same = next((u for u in updates if u["release"] == release), None)  # a second update for the same release
+    if same:
+        same["date"] = max(same["date"], date)
+        same["runs"] += [f for f in files if f not in same["runs"]]
+        same["models"] += [m for m in models if m not in same["models"]]
+    else:
+        updates.append({"release": release, "date": date, "runs": files, "models": models})
+    edition["trained_on"] = TRAINED_ON  # what the scores above left out, for the updated models too
+    return edition
+
+
+def update(path, release, date, files, models, scores):
+    edition = merge_update(json.load(open(path, encoding="utf-8")), release, date, files, models, scores)
+    json.dump(edition, open(path, "w", encoding="utf-8"), indent=1)
+    print("wrote", ", ".join(files), "and updated", path.name)
 
 
 if __name__ == "__main__":

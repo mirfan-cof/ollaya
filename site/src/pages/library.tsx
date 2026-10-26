@@ -1,5 +1,6 @@
+import type { Child } from 'hono/jsx'
 import { Icon } from '../components/Icon'
-import { CapBadge, CodeTabs, OutlinePill, SizeBadge, textLink } from '../components/ui'
+import { CapBadge, CodeBlock, CodeTabs, OutlinePill, SizeBadge, textLink } from '../components/ui'
 import { Updated } from '../components/Updated'
 import {
   featuredTags,
@@ -13,6 +14,7 @@ import {
 } from '../data/catalog'
 import { usageTabs, visionUsageTabs } from '../data/examples'
 import { readmes } from '../generated/content'
+import { benchGpu, measured, trainedOnTyped, withResults } from '../data/numbers'
 
 // Pages: /library/<model>, /library/<model>/tags and /library/<model>:<tag>.
 // (/library itself redirects to /search; see public/_redirects and LibraryRedirect below.)
@@ -84,7 +86,7 @@ function ModelHeader({ model, tag, crumb }: { model: Model; tag?: Tag; crumb?: s
   return (
     <header>
       <Breadcrumb model={model} current={crumb} />
-      <h1 class="mt-4 text-[28px] leading-tight font-medium tracking-tight break-words text-fg">
+      <h1 class="mt-4 font-mono text-4xl leading-tight font-semibold tracking-tight break-words text-fg md:text-5xl">
         {tag ? fullName(model, tag) : model.name}
       </h1>
       <MetaLine
@@ -144,92 +146,225 @@ const inputLabel = (tag: Tag) =>
     ? `Text · auto (${(tag.routesTo ?? []).join(' / ')})`
     : `${tag.capabilities.includes('vision') ? 'Text, image' : 'Text'} · ${tag.languages}`
 
+/** A tag's bench numbers, for the tables: typed-decisions accuracy (not for a tag trained on that split) and the GPU latency. */
+function tagNumbers(model: Model, tag: Tag) {
+  // `latest` is usually an alias ("Same as decider:2b."); its numbers are the tag it names.
+  const alias = tag.name === 'latest' ? tag.summary.match(/^Same as [^:]+:([^.\s]+)/)?.[1] : undefined
+  const ref = fullName(model, (alias && getTag(model, alias)) || tag)
+  return { acc: trainedOnTyped(ref) ? undefined : measured(ref, 'typed.accuracy'), ms: measured(ref, 'gpu.p50_ms') }
+}
+
+/**
+ * The featured tags in groups a reader chooses by: the fastest, the most accurate, the ones that read
+ * images, the router. A tag is in one group; within a group the order is the group's measure.
+ */
+function groupTags(model: Model): { title: string; note: string; tags: Tag[] }[] {
+  const tags = featuredTags(model).map((t) => ({ t, ...tagNumbers(model, t) }))
+  const routers = tags.filter((x) => x.t.kind === 'router')
+  const vision = tags.filter((x) => x.t.kind !== 'router' && x.t.capabilities.includes('vision'))
+  const text = tags.filter((x) => x.t.kind !== 'router' && !x.t.capabilities.includes('vision'))
+  const measuredText = text.filter((x) => x.acc !== undefined && x.ms !== undefined)
+  // With two or more measured text tags, the most accurate leads one group and the rest sort by speed.
+  if (measuredText.length >= 2) {
+    const best = [...measuredText].sort((p, q) => q.acc! - p.acc!)[0]!
+    const rest = text.filter((x) => x !== best).sort((p, q) => (p.ms ?? Infinity) - (q.ms ?? Infinity) || (p.t.name === 'latest' ? 1 : 0) - (q.t.name === 'latest' ? 1 : 0))
+    return [
+      { title: 'Most accurate', note: 'Highest typed-decisions accuracy of the family.', tags: [best.t] },
+      { title: 'Faster', note: 'Fastest first; accuracy as measured on the bench.', tags: rest.map((x) => x.t) },
+      ...(vision.length ? [{ title: 'Reads images', note: 'A PNG with the state, through the author’s projector.', tags: vision.map((x) => x.t) }] : []),
+      ...(routers.length ? [{ title: 'Router', note: 'Picks one of the tags above per request.', tags: routers.map((x) => x.t) }] : []),
+    ].filter((g) => g.tags.length)
+  }
+  return [
+    { title: 'Models', note: '', tags: text.sort((p, q) => (p.ms ?? Infinity) - (q.ms ?? Infinity)).map((x) => x.t) },
+    ...(vision.length ? [{ title: 'Reads images', note: '', tags: vision.map((x) => x.t) }] : []),
+    ...(routers.length ? [{ title: 'Router', note: '', tags: routers.map((x) => x.t) }] : []),
+  ].filter((g) => g.tags.length)
+}
+
+const num = (v: number | undefined, digits: number, unit = '') => (v === undefined ? '—' : `${v.toFixed(digits)}${unit}`)
+
 function ModelsTable({ model }: { model: Model }) {
+  const groups = groupTags(model)
+  const anyNumbers = featuredTags(model).some((t) => {
+    const n = tagNumbers(model, t)
+    return n.acc !== undefined || n.ms !== undefined
+  })
   return (
-    <section class="mt-10" aria-labelledby="models-title">
+    <section class="mt-12" aria-labelledby="models-title">
       <div class="flex items-baseline justify-between gap-4">
-        <h2 id="models-title" class="text-base font-semibold text-fg">
+        <h2 id="models-title" class="text-xl font-semibold tracking-[-0.02em] text-fg">
           Models
         </h2>
-        <a
-          href={`/library/${model.name}/tags`}
-          class="inline-flex items-center gap-1 text-[13px] text-muted underline-offset-4 hover:text-fg hover:underline"
-        >
-          View all <Icon name="arrowRight" class="size-3.5" />
+        <a href={`/library/${model.name}/tags`} class="inline-flex items-center gap-1 text-[13px] text-muted underline-offset-4 hover:text-fg hover:underline">
+          Every tag <Icon name="arrowRight" class="size-3.5" />
         </a>
       </div>
-      <div class="mt-3 overflow-hidden rounded-lg border border-line">
+      <div class="mt-4 overflow-hidden rounded-md border border-line">
         <table class="w-full text-left text-sm">
           <thead class="bg-subtle text-[13px] text-muted">
             <tr>
               <th scope="col" class={head}>
                 Name
               </th>
-              <th scope="col" class={`${head} hidden sm:table-cell`}>
+              {anyNumbers ? (
+                <>
+                  <th scope="col" class={`${head} text-right`}>
+                    Accuracy
+                  </th>
+                  <th scope="col" class={`${head} text-right`}>
+                    Latency
+                  </th>
+                </>
+              ) : null}
+              <th scope="col" class={`${head} hidden text-right sm:table-cell`}>
                 Size
               </th>
-              <th scope="col" class={`${head} hidden sm:table-cell`}>
+              <th scope="col" class={`${head} hidden text-right sm:table-cell`}>
                 Context
               </th>
-              <th scope="col" class={`${head} hidden md:table-cell`}>
+              <th scope="col" class={`${head} hidden lg:table-cell`}>
                 Input
               </th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-line">
-            {featuredTags(model).map((t) => (
-              <tr>
-                <td class={cell}>
-                  <TagName model={model} tag={t} />
-                  <span class="mt-1 block text-[13px] text-muted sm:hidden">
-                    {t.kind === 'router' ? 'router' : `${sizeLabel(t)} · ${t.context} ctx · ${t.languages}`}
-                  </span>
-                </td>
-                <td class={`${cell} hidden whitespace-nowrap text-body tabular-nums sm:table-cell`}>{sizeLabel(t)}</td>
-                <td class={`${cell} hidden whitespace-nowrap text-body tabular-nums sm:table-cell`}>{t.context}</td>
-                <td class={`${cell} hidden text-body md:table-cell`}>{inputLabel(t)}</td>
-              </tr>
-            ))}
-          </tbody>
+          {groups.map((g) => (
+            <tbody class="border-t border-line">
+              {groups.length > 1 ? (
+                <tr class="bg-subtle/60">
+                  <th scope="rowgroup" colspan={6} class="px-4 py-2 text-left text-[13px] font-medium text-fg">
+                    {g.title}
+                    {g.note ? <span class="ml-2 font-normal text-muted">{g.note}</span> : null}
+                  </th>
+                </tr>
+              ) : null}
+              {g.tags.map((t) => {
+                const n = tagNumbers(model, t)
+                return (
+                  <tr class="border-t border-line">
+                    <td class={cell}>
+                      <TagName model={model} tag={t} />
+                      <span class="mt-1 block text-[13px] text-muted">{t.summary}</span>
+                    </td>
+                    {anyNumbers ? (
+                      <>
+                        <td class={`${cell} text-right whitespace-nowrap text-fg tabular-nums`}>{n.acc === undefined && trainedOnTyped(fullName(model, t)) ? <span class="text-muted" title="Trained on this dataset's train split">trained</span> : num(n.acc, 3)}</td>
+                        <td class={`${cell} text-right whitespace-nowrap text-fg tabular-nums`}>{n.ms === undefined ? '—' : `${Math.round(n.ms)} ms`}</td>
+                      </>
+                    ) : null}
+                    <td class={`${cell} hidden text-right whitespace-nowrap text-body tabular-nums sm:table-cell`}>{sizeLabel(t)}</td>
+                    <td class={`${cell} hidden text-right whitespace-nowrap text-body tabular-nums sm:table-cell`}>{t.context}</td>
+                    <td class={`${cell} hidden text-body lg:table-cell`}>{inputLabel(t)}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          ))}
         </table>
       </div>
-      {featuredTags(model).some((t) => t.precision === 'auto') && (
-        <p class="mt-2 text-[13px] text-muted">
-          Each model carries fp16 and fp32 graphs over one weights file, and loads fp16 on a CUDA GPU and fp32 on CPU.
-        </p>
-      )}
+      <p class="mt-2 text-[13px] text-muted">
+        {anyNumbers ? `Accuracy: typed-decisions, argmax against the majority label on 400 states (left out for a tag trained on that data). Latency: the median five-question request on an ${benchGpu}, Ollaya Bench. ` : ''}
+        {featuredTags(model).some((t) => t.precision === 'auto') ? 'Each model carries fp16 and fp32 graphs over one weights file, and loads fp16 on a CUDA GPU and fp32 on CPU.' : ''}
+      </p>
     </section>
   )
 }
 
-export function ModelPage({ model }: { model: Model }) {
-  const readme = readmes[model.name]
+/** The right column of a model's pages: the numbers and facts a reader scans before reading. */
+function Aside({ model, tag }: { model: Model; tag?: Tag }) {
+  const main = tag ?? getTag(model, 'latest') ?? model.tags[0]
+  const n = main ? tagNumbers(model, main) : { acc: undefined, ms: undefined }
+  const rows: [string, Child][] = [
+    ['Publisher', model.publisher ? <a href={model.publisher.url} class={textLink}>{model.publisher.name}</a> : '—'],
+    ['License', model.license || '—'],
+    ['Sizes', model.sizes.join(' · ') || '—'],
+    ['Tags', <a href={`/library/${model.name}/tags`} class={textLink}>{model.tags.length}</a>],
+    ...(model.updated ? ([['Updated', <Updated iso={model.updated} />]] as [string, Child][]) : []),
+    ...(model.source ? ([['Weights', <a href={model.source} class={textLink}>source repository</a>]] as [string, Child][]) : []),
+  ]
   return (
-    <div class="mx-auto max-w-[52rem] px-4 pt-8 md:px-6 md:pt-12">
+    <aside class="lg:sticky lg:top-24" aria-label="At a glance">
+      <div class="rounded-md border border-line">
+        {n.acc !== undefined || n.ms !== undefined ? (
+          <dl class="grid grid-cols-2 divide-x divide-line border-b border-line">
+            <div class="p-5">
+              <dd class="text-3xl font-semibold tracking-[-0.02em] text-fg tabular-nums">{num(n.acc, 3)}</dd>
+              <dt class="mt-1 text-[13px] text-muted">accuracy, typed decisions</dt>
+            </div>
+            <div class="p-5">
+              <dd class="text-3xl font-semibold tracking-[-0.02em] text-fg tabular-nums">{n.ms === undefined ? '—' : `${Math.round(n.ms)} ms`}</dd>
+              <dt class="mt-1 text-[13px] text-muted">five questions, {benchGpu}</dt>
+            </div>
+          </dl>
+        ) : null}
+        <dl class="divide-y divide-line text-sm">
+          {rows.map(([k, v]) => (
+            <div class="flex items-baseline justify-between gap-4 px-5 py-3">
+              <dt class="text-muted">{k}</dt>
+              <dd class="text-right text-body">{v}</dd>
+            </div>
+          ))}
+        </dl>
+        {main ? (
+          <div class="border-t border-line p-5">
+            <p class="text-[13px] text-muted">Run it</p>
+            <CodeBlock code={`ollaya run ${main.name === 'latest' ? model.name : fullName(model, main)}`} class="mt-2" />
+          </div>
+        ) : null}
+      </div>
+    </aside>
+  )
+}
+
+/** The page shell shared by a model's pages: the content on the left, the aside on the right. */
+function Shell({ aside, children }: { aside: Child; children: Child }) {
+  return (
+    <div class="px-6 pt-10 pb-16 md:px-10 md:pt-14 lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:gap-14">
+      <div class="min-w-0">{children}</div>
+      <div class="mt-12 lg:mt-0">{aside}</div>
+    </div>
+  )
+}
+
+export function ModelPage({ model, origin }: { model: Model; origin: string }) {
+  const readme = readmes[model.name]
+  const badge = `[![Run on Ollaya](${origin}/badge/run-on-ollaya.svg)](${origin}/library/${model.name})`
+  return (
+    <Shell aside={<Aside model={model} />}>
       <ModelHeader model={model} />
       <Usage refName={model.name} model={model} tag={getTag(model, 'latest') ?? model.tags[0]} />
       <ModelsTable model={model} />
       {readme ? (
-        <section class="mt-12 border-t border-line pt-10" aria-labelledby="readme-title">
-          <h2 id="readme-title" class="text-base font-semibold text-fg">
+        <section class="mt-14 border-t border-line pt-10" aria-labelledby="readme-title">
+          <h2 id="readme-title" class="text-xl font-semibold tracking-[-0.02em] text-fg">
             Readme
           </h2>
-          <div class="prose mt-6" dangerouslySetInnerHTML={{ __html: readme }}></div>
+          <div class="prose mt-6" dangerouslySetInnerHTML={{ __html: withResults(readme) }}></div>
         </section>
       ) : null}
-    </div>
+      <section class="mt-14 border-t border-line pt-10" aria-labelledby="badge-title">
+        <h2 id="badge-title" class="text-xl font-semibold tracking-[-0.02em] text-fg">
+          Badge
+        </h2>
+        <img src="/badge/run-on-ollaya.svg" alt="Run on Ollaya" width="104" height="20" class="mt-4" />
+        <p class="mt-3 text-sm text-body">
+          For the model card or a README. <a href="/docs/model-authors" class={textLink}>Day-0 support for a new model</a>
+        </p>
+        <CodeBlock code={badge} lang="markdown" class="mt-3" />
+      </section>
+    </Shell>
   )
 }
 
 export function TagsPage({ model }: { model: Model }) {
   return (
-    <div class="mx-auto max-w-[52rem] px-4 pt-8 md:px-6 md:pt-12">
+    <Shell aside={<Aside model={model} />}>
       <ModelHeader model={model} crumb="tags" />
       <section class="mt-10" aria-labelledby="tags-title">
         <h2 id="tags-title" class="text-base font-semibold text-fg">
           Tags
         </h2>
-        <div class="mt-3 overflow-hidden rounded-lg border border-line">
+        <div class="mt-3 overflow-hidden rounded-md border border-line">
           <table class="w-full text-left text-sm">
             <thead class="bg-subtle text-[13px] text-muted">
               <tr>
@@ -278,7 +413,7 @@ export function TagsPage({ model }: { model: Model }) {
           <code class="font-mono">-fp32</code> to pin one precision.
         </p>
       </section>
-    </div>
+    </Shell>
   )
 }
 
@@ -288,7 +423,7 @@ export function TagPage({ model, tag }: { model: Model; tag: Tag }) {
   const variants = model.tags.filter((t) => t.variantOf === tag.name)
   const base = tag.variantOf ? getTag(model, tag.variantOf) : undefined
   return (
-    <div class="mx-auto max-w-[52rem] px-4 pt-8 md:px-6 md:pt-12">
+    <Shell aside={<Aside model={model} tag={tag} />}>
       <ModelHeader model={model} tag={tag} crumb={tag.name} />
       <Usage refName={tag.name === 'latest' ? model.name : ref} model={model} tag={tag} />
 
@@ -296,7 +431,7 @@ export function TagPage({ model, tag }: { model: Model; tag: Tag }) {
         <h2 id="details-title" class="text-base font-semibold text-fg">
           Details
         </h2>
-        <ul class="mt-3 divide-y divide-line rounded-lg border border-line" role="list">
+        <ul class="mt-3 divide-y divide-line rounded-md border border-line" role="list">
           {layers.map((l) => (
             <li class="grid grid-cols-[minmax(0,1fr)_auto] items-baseline gap-x-4 gap-y-1 px-4 py-3 sm:grid-cols-[7rem_minmax(0,1fr)_auto]">
               <span class="text-sm font-medium text-fg">{l.kind}</span>
@@ -355,7 +490,7 @@ export function TagPage({ model, tag }: { model: Model; tag: Tag }) {
               <li>
                 <a
                   href={`/library/${fullName(model, t)}`}
-                  class="inline-flex items-center gap-2 rounded-3xl border border-line px-3 py-1 text-[13px] text-body hover:border-line-strong hover:text-fg"
+                  class="inline-flex items-center gap-2 rounded-md border border-line px-3 py-1 text-[13px] text-body hover:border-line-strong hover:text-fg"
                 >
                   <span class="font-medium">{fullName(model, t)}</span>
                   <span class="text-muted">{sizeLabel(t)}</span>
@@ -374,7 +509,7 @@ export function TagPage({ model, tag }: { model: Model; tag: Tag }) {
           {model.title} readme and all models <Icon name="arrowRight" class="size-4" />
         </a>
       </p>
-    </div>
+    </Shell>
   )
 }
 

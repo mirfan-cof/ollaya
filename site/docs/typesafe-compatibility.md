@@ -1,7 +1,7 @@
 ---
-title: TypeSafe compatibility
+title: TypeSafe compatibility (Jev-compatible API)
 nav: TypeSafe compatibility
-description: Use the official TypeSafe SDK and existing code with local, open models by changing environment variables.
+description: Ollaya is a self-hosted, Jev-compatible API server. Use the official TypeSafe SDK and existing Jev code with local, open models by changing environment variables.
 order: 5
 ---
 
@@ -20,12 +20,23 @@ export TYPESAFE_DEFAULT_MODEL=winnow:e4b   # otherwise the SDK sends its default
 export NO_PROXY=localhost,127.0.0.1    # keep local requests off any system proxy
 ```
 
-- **Default model.** `winnow:e4b` comes closest to Jev (0.722 on typed decisions, against 0.738) and answers in about 90 ms on an RTX 4090. Without an NVIDIA GPU, use `laya`, which answers in a fraction of a second on a CPU.
+- **Default model.** `winnow:e4b` is the recommended model. It scores {{result winnow:e4b typed.accuracy 3}} on typed decisions, against the 0.738 TypeSafe reports for Jev and within a few thousandths of the best open models, and answers five questions in {{result winnow:e4b gpu.p50_ms 0}} ms on an RTX 5090. Without an NVIDIA GPU, use `laya`, which answers in a fraction of a second on a CPU.
 - **API key.** Ollaya accepts any key, unless the server sets `OLLAYA_API_KEY`; then the SDK's key must match it.
 - **Request IDs.** Every response carries `x-typesafe-request-id`, so `response.request_id` works.
 - **Retries.** The SDK times out after 10 s and retries. The first request to a model waits while it loads, and a load that outlives the request continues, so the retry finds the model warm.
 - **System proxies.** On a Mac with a system HTTP proxy, the TypeSafe SDK (like `httpx`) sends requests for `localhost` through the proxy too, ignoring the system's exception list. Your states then pass through the proxy, and while Ollaya is down the SDK reports `502 status code (no body)` instead of a refused connection. Set `NO_PROXY=localhost,127.0.0.1` next to `TYPESAFE_BASE_URL`.
 - **Warm-up and timings.** To load a model before the first request, send `{"model": "winnow:e4b", "keep_alive": -1}` to [`/api/decide`](/docs/api#decide) (no `state`). `/v1/*` responses carry no timings, as TypeSafe's don't; `/api/decide` reports `total_duration`, `load_duration` and `eval_duration`.
+
+## Libraries
+
+Libraries that reach Ollaya through this API. To add one, open a pull request with a line here: its link, what it does and how it reaches Ollaya.
+
+- **[gut](https://gutpy.dev)** (Python). Judgment calls as one line of code: `gut.likely(text, "is spam")`, `gut.classify` and `gut.rate` answer YES, NO or UNSURE. `gut.JevBackend.ollaya("winnow:e4b")` asks Ollaya through the TypeSafe SDK and reads `OLLAYA_HOST` and `OLLAYA_API_KEY`. Install with `pip install "gutfeel[jev]"`; see its [Ollaya notes](https://gutpy.dev/docs/backends.html#on-your-own-machine-through-ollaya).
+- **[LiteLLM](https://docs.litellm.ai)** (Python, and its proxy). `litellm.systemone` and `litellm.decisions` with the `typesafe/` provider, and a guardrail that drops stale tool results before an LLM call. It reaches Ollaya through `api_base` or `TYPESAFE_API_BASE`; see [Integrations](/docs/integrations#litellm).
+- **[LangChain](https://docs.langchain.com/oss/python/integrations/providers/typesafe)** (Python and JS). `TypeSafeClassifier`, a runnable, plus experimental agent middleware that routes between models and blocks risky tool calls. It reaches Ollaya through `base_url`/`baseUrl` or `TYPESAFE_BASE_URL`; see [Integrations](/docs/integrations#langchain).
+- **[Vercel AI SDK](https://ai-sdk.dev/providers/ai-sdk-providers/typesafe-ai)** (TypeScript). `@ai-sdk/typesafe-ai`, decision models for `experimental_decide`. It reaches Ollaya through `baseURL` or `TYPESAFE_AI_BASE_URL`, ending in `/v1`; see [Integrations](/docs/integrations#vercel-ai-sdk).
+- **[DSPy](https://dspy.ai)** (Python). `Choice`, `Noul` and `Score` output fields for signatures, answered by `dspy.experimental.TypeSafe`. It reaches Ollaya through `base_url` or `TYPESAFE_BASE_URL`; see [Integrations](/docs/integrations#dspy).
+- **[llama-index-jev](https://github.com/WiktorB2004/llama-index-jev)** (Python, community). A LlamaIndex reranker and router selector. It reaches Ollaya through `TYPESAFE_BASE_URL`; see [Integrations](/docs/integrations#llamaindex).
 
 ## Endpoints
 
@@ -120,8 +131,8 @@ Compatibility covers the API, not the model:
 - **Long states.** TypeSafe reads up to 65,536 tokens; an open model's context is shorter (512 tokens for `laya:en`, 1,024 for `laya:multilingual`, including the questions). When a state doesn't fit, `/v1/*` returns `422 STATE_TRUNCATED` rather than answering from part of it. Use a model with a longer context, shorten the state, or call [`/api/decide`](/docs/api#decide), which truncates and reports `state_truncated`.
 - **`/v1/*` stays pure.** Native fields such as `keep_alive` and `extras` are ignored there; routing, timings and truncation are reported on [`/api/decide`](/docs/api#decide).
 - **Quality** comes from open models, so it differs from Jev's by task:
-  - `laya:typed-decisions` scores 0.766 on typed-decisions, against 0.727 published for Jev 1.13.
-  - The base Laya checkpoints are near chance zero-shot on typed-decisions (0.362).
+  - `laya:typed-decisions`, which trains on this dataset, scores {{result laya:typed-decisions typed.accuracy 3}} on typed-decisions, against the 0.738 TypeSafe reports for Jev.
+  - The base Laya checkpoints are near chance zero-shot on typed-decisions ({{result laya:en typed.accuracy 3}} for `laya:en`).
   - Choice questions with many options (more than ~20) are weaker: 0.425 on Banking77, against 0.870 for Jev.
 
 Measure on your own data before switching production traffic. The [Laya page](/library/laya) has the details.

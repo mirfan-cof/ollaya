@@ -6,27 +6,39 @@ refuses to run if its sha256 differs from the upstream file.
 """
 import os
 
-from .model_paths import DEFAULT_ROOT
+from .model_paths import COBA_ROOT, DEFAULT_ROOT, LARGHA_ROOT
 
 OUT = os.path.join(os.path.dirname(__file__), "..", "out")
 LICENSE_APACHE = open(os.path.join(os.path.dirname(__file__), "..", "..", "LICENSE"), encoding="utf-8").read()
 
 LAYA_REPO = "convaiinnovations/laya"
 LAYA_COMMIT = "aa8c91ca088ec597df95a0d1c76b3063cb2ae5e8"
+LARGHA_REPO = "Phocinae/Phocinae-Largha-150M-v1"
+LARGHA_COMMIT = "5300e85a7d991f4f0cdb68dc25813f76902752d4"  # tag v1.1
+# Ollaya's own models: tag -> commit of ollaya-dev/coba-<tag>.
+COBA_COMMITS = {
+    "1b": "044c84cd2bb3fc5c0b3c4d32d5177bb54bfbb68d",
+    "400m": "b9db262294a2106c5953870ff29f5e13f8b4e556",
+    "400m-ternary": "fd90709a8e7575bd220b3aa6c7d522c168d9e209",
+    "150m-ternary": "3609cf41de228721ac41b0bae70a6c26e7c19f17",
+    "68m-ternary": "e0c9c8f84cef45e168748dc3e2bbe726bd1ac910",
+}
 
 
-def _laya(sub, description, params, ctx, languages, mlx=False):
-    """`mlx`: publish an arch layer (the tag passed its parity gate on Metal)."""
+def _laya(sub, description, params, ctx, languages, mlx=False, repo=LAYA_REPO, commit=LAYA_COMMIT,
+          root=DEFAULT_ROOT, slug=None):
+    """`mlx`: publish an arch layer (the tag passed its parity gate on Metal). `repo`, `commit` and
+    `root` name another author's laya checkpoint; `slug` then names its exports."""
     prefix = sub + "/" if sub else ""
-    slug = sub or "en"
+    slug = slug or sub or "en"
     arch = {"family": "laya", "config": prefix + "encoder/config.json",
             "agent_config": prefix + "rl_agent_config.json"} if mlx else None
     return {
-        "repo": LAYA_REPO,
-        "commit": LAYA_COMMIT,
+        "repo": repo,
+        "commit": commit,
         "weights": prefix + "model.safetensors",
         "tokenizer": prefix + "tokenizer/tokenizer.json",
-        "checkpoint": os.path.join(DEFAULT_ROOT, prefix, "model.safetensors"),
+        "checkpoint": os.path.join(root, prefix, "model.safetensors"),
         "prefix": "model.",
         "exports": {
             # fp32: the opset-23 export (fused Attention, CPU); fp16: derived from the opset-20 one.
@@ -130,9 +142,25 @@ def _kev_license(repo, base):
             "Licensed under the Apache License, Version 2.0.\n\n" % (repo, base, base)) + LICENSE_APACHE
 
 
+NIMBLE_V3_LICENSE = (
+    "Bespoke-Nimble-9B-v3 by Bespoke Labs (https://huggingface.co/bespokelabs/Bespoke-Nimble-9B-v3)\n"
+    "LoRA adapter: Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0), per the model card: "
+    "it may not be used for commercial purposes. https://creativecommons.org/licenses/by-nc/4.0/legalcode\n"
+    "Base model: Qwen3.5-9B by the Qwen team (https://huggingface.co/Qwen/Qwen3.5-9B), Apache-2.0.\n\n") + LICENSE_APACHE
+
+
 LICENSE_MIT_NLI = ("DeBERTa-v3-large zero-shot v2.0 by Moritz Laurer "
                    "(https://huggingface.co/MoritzLaurer/deberta-v3-large-zeroshot-v2.0), MIT License.\n"
                    "Note from the model card: part of the training data carries non-commercial licenses.\n")
+
+# The Gemma 4 tags' license layer; the Qwen tag keeps the family text, so its manifests do not change.
+_STRANDS_GEMMA_LICENSE = ("Strands Decider by Strands Agents "
+                          "(https://huggingface.co/StrandsAgents/strands-decider-E2B-gemma4-v1-2610, "
+                          "https://huggingface.co/StrandsAgents/strands-decider-E4B-gemma4-v1-2610)\n"
+                          "LoRA adapters and pointer heads: Apache-2.0 (LICENSE.md in the model repositories).\n"
+                          "Base models: Gemma 4 E2B and E4B (instruction-tuned) by Google DeepMind "
+                          "(https://huggingface.co/google/gemma-4-E2B-it, https://huggingface.co/google/gemma-4-E4B-it), "
+                          "Apache-2.0.\nLicensed under the Apache License, Version 2.0.\n\n") + LICENSE_APACHE
 
 CATALOG = {
     "d1": {
@@ -155,6 +183,26 @@ CATALOG = {
                   "projector, with prompts and answer-token groups from Liquid AI's pinned prompt.py: 650 text and "
                   "55 image questions on the CPU, an RTX 4090 and an RTX 5090 (29 and 24 on the contributor's CPU "
                   "and RTX 4070), every decision the same, option log-probabilities within 7.7e-6.",
+    },
+    # d1-omni-600M: the same LFM Open License v1.0 text as d1-3B (the repo's LICENSE differs in blank lines only).
+    "d1-omni": {
+        "namespace": "library", "model": "d1-omni", "family": "d1-omni", "author": "Liquid AI",
+        "license": "LFM Open License v1.0",
+        "license_text": "d1-omni-600M by Liquid AI (https://huggingface.co/LiquidAI/d1-omni-600M).\n\n" +
+            open(os.path.join(os.path.dirname(__file__), "families", "d1", "LICENSE"), encoding="utf-8").read(),
+        "tags": {
+            # Text path only: the trunk (LFM2.5-Encoder-350M, bidirectional) and the decision head; the vision and
+            # audio encoders in the same checkpoint are not referenced (docs/families/d1-omni.md).
+            "600m": _wl("d1-omni-600m", "LiquidAI/d1-omni-600M", "02b55d7076f15129e59ab3f94783f32c4b088674",
+                        "Liquid AI's d1-omni-600M, text questions: an LFM2.5 encoder with a decision head that scores "
+                        "every option at its own marker, calibrated per question type and option count; 16k-token "
+                        "context. Images and audio are not served.",
+                        "587M", 16384, ["en", "de", "es", "fr", "it", "nl", "pl", "pt", "ar", "hi", "ja", "ru", "tr",
+                                        "vi", "zh"],
+                        wl_dir=os.path.join(OUT, "d1-omni-600m")),
+        },
+        "aliases": {"latest": "600m"},
+        "hf_license": ("lfm1.0", "https://huggingface.co/LiquidAI/d1-omni-600M/blob/02b55d7076f15129e59ab3f94783f32c4b088674/LICENSE"),
     },
     "laya": {
         "namespace": "library",
@@ -182,6 +230,56 @@ CATALOG = {
             },
         },
     },
+    "largha": {
+        "namespace": "library",
+        "model": "largha",
+        "family": "laya",
+        "author": "Phocinae",
+        "license": "Apache-2.0",
+        "license_text": "Phocinae-Largha-150M-v1 by Phocinae (https://huggingface.co/Phocinae/Phocinae-Largha-150M-v1)\n"
+                        "Licensed under the Apache License, Version 2.0. Its base encoder, jhu-clsp/mmBERT-small "
+                        "(https://huggingface.co/jhu-clsp/mmBERT-small), is MIT-licensed by JHU CLSP.\n\n"
+                        + LICENSE_APACHE,
+        "tags": {
+            "150m": _laya("", "Laya decision model on mmBERT-small, fine-tuned on the typed-decisions workflows.",
+                          "144M", 512, ["multilingual"], mlx=True, repo=LARGHA_REPO, commit=LARGHA_COMMIT,
+                          root=LARGHA_ROOT, slug="largha"),
+        },
+        "aliases": {"latest": "150m"},
+        "parity": "Ollaya's runtime matches laya's own loader (0.3.7, which renders TypeSafe questions as the 0.3.20 "
+                  "Largha was trained with) on the v1.1 checkpoint in fp32: 2,383 questions, identical token ids and "
+                  "markers, the same decision on every question, probabilities within 3.5e-6 on the CPU, CUDA and "
+                  "the Apple GPU (MLX). The fp16 graph agrees on 99.87% of decisions (3 near-ties).",
+    },
+    "coba": {
+        "namespace": "library",
+        "model": "coba",
+        "family": "laya",
+        "author": "Ollaya",
+        "license": "Apache-2.0",
+        "license_text": "Coba by Ollaya (https://huggingface.co/ollaya-dev)\n"
+                        "Licensed under the Apache License, Version 2.0. Its base encoders, Ettin "
+                        "(https://huggingface.co/jhu-clsp/ettin-encoder-150m and its sizes), are MIT-licensed by JHU CLSP.\n\n"
+                        + LICENSE_APACHE,
+        "tags": {
+            t: _laya("", d, params, 512, ["en"], mlx=True, repo="ollaya-dev/coba-" + t, commit=COBA_COMMITS[t],
+                     root=os.path.join(COBA_ROOT, t), slug="coba-" + t)
+            for t, d, params in (
+                ("1b", "Ollaya's English decision model on Ettin 1B, zero-shot: the most accurate size.", "1.1B"),
+                ("400m", "Ollaya's English decision model on Ettin 400M, zero-shot.", "421M"),
+                ("400m-ternary", "Ternary weights on Ettin 400M, trained in-domain; its 2-bit graph runs in a browser.",
+                 "421M"),
+                ("150m-ternary", "Ternary weights on Ettin 150M, trained in-domain; a 66 MB download in a browser.",
+                 "164M"),
+                ("68m-ternary", "Ternary weights on Ettin 68M, trained in-domain; a 35 MB download in a browser.", "75M"),
+            )
+        },
+        "aliases": {"latest": "400m"},
+        "parity": "Ollaya's runtime matches laya's own loader (0.3.7, which coba was trained with) on each checkpoint in "
+                  "fp32: 2,383 questions, identical token ids and markers, the same decision on every question, "
+                  "probabilities within 2e-5 on the CPU, CUDA and the Apple GPU (MLX). The fp16 graphs agree on "
+                  "99.7% to 99.8% of decisions (4 to 7 near-ties).",
+    },
     "nli": {
         "namespace": "library",
         "model": "nli",
@@ -194,7 +292,7 @@ CATALOG = {
                 "deberta-v3-large-zeroshot-v2.0", "MoritzLaurer/deberta-v3-large-zeroshot-v2.0",
                 "cf44676c28ba7312e5c5f8f8d2c22b3e0c9cdae2",
                 "Zero-shot NLI classifier (DeBERTa-v3-large): each option is a hypothesis scored for entailment.",
-                "435M", 512, ["en"]),
+                "435M", 512, ["en"], arch={"family": "sequence-classification", "config": "config.json"}),
             "modernbert-large": _wl(
                 "modernbert-large-zeroshot-v2.0", "MoritzLaurer/ModernBERT-large-zeroshot-v2.0",
                 "a51e07b524299e309dd2b88d48b0cfa2bd9ec598",
@@ -224,12 +322,46 @@ CATALOG = {
                 "gliclass-instruct-large", "knowledgator/gliclass-instruct-large-v1.0",
                 "825e5478c1bf4bffbf297690517097ccbdb2e006",
                 "Instruction-following zero-shot classifier: all options scored in one pass.",
-                "439M", 1024, ["en"]),
+                "439M", 1024, ["en"], arch={"family": "gliclass", "config": "config.json"}),
+            # GLiClass v4's 0.4B release: first-token label pooling and a calibrator in the graph (gliclass 0.1.21).
+            # No arch layer: the MLX head has neither.
+            "v4-edge": _wl(
+                "gliclass-v4-edge", "knowledgator/gliclass-v4-edge", "2486b93469dde357d2b8f675a6514959e3f0fc6e",
+                "Knowledgator's GLiClass v4 Edge: instruction-following zero-shot classifier on DeBERTa-v3-large "
+                "with a calibrator that rescales every label's logit; all options scored in one pass.",
+                "440M", 1024, ["en"],
+                license_text="GLiClass v4 Edge by Knowledgator (https://huggingface.co/knowledgator/gliclass-v4-edge)\n"
+                             "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE),
         },
         "aliases": {"latest": "large"},
         "parity": "Ollaya's Rust runtime matches the Python reference exactly on 482 questions. "
                   "The token ids and label positions are identical, and so is the decision on every "
                   "question. Probabilities are within 1e-5, on CPU and CUDA.",
+    },
+    # GLiClass v4 (decoder-KV): a different architecture and layout from the uni-encoder `gliclass`, so its own entry.
+    "gliclass-v4": {
+        "namespace": "library",
+        "model": "gliclass-v4",
+        "family": "gliclass-kv",
+        "author": "Knowledgator (GLiClass) and the Qwen team (base models)",
+        "license": "Apache-2.0",
+        "license_text": "GLiClass v4 by Knowledgator (https://huggingface.co/knowledgator/gliclass-v4-2b, "
+                        "https://huggingface.co/knowledgator/gliclass-v4-9b)\n"
+                        "Base models: Qwen3.5-2B and Qwen3.5-9B by the Qwen team, Apache-2.0.\n"
+                        "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE,
+        "tags": {
+            "2b": _wl("gliclass-v4-2b", "knowledgator/gliclass-v4-2b", "40fe023b45e8d97d1ae4f7f9342279ac1c76317d",
+                      "GLiClass v4 2B (decoder-KV on Qwen3.5-2B): the labels follow the instructions and the state in one "
+                      "decoder row, a two-layer scorer reads them against the text with up to three reasoning steps, and "
+                      "the model's own calibrator scales every label logit. Up to 25 labels upstream; 8,192 tokens per row. "
+                      "Text only. Needs about 7 GB of memory (BF16 weights in memory).",
+                      "2.4B", 8192, ["en"], wl_dir=os.path.join(OUT, "gliclass-v4-2b")),
+            "9b": _wl("gliclass-v4-9b", "knowledgator/gliclass-v4-9b", "14d11a92b5e0bab4a166e1fce4cc0777cac27182",
+                      "GLiClass v4 9B (decoder-KV on Qwen3.5-9B): the same scorer and calibrator on the 9B decoder. "
+                      "Text only. Needs about 20 GB of memory (BF16 weights in memory).",
+                      "9.5B", 8192, ["en"], wl_dir=os.path.join(OUT, "gliclass-v4-9b")),
+        },
+        "aliases": {"latest": "2b"},
     },
     "decider": {
         "namespace": "library",
@@ -240,15 +372,18 @@ CATALOG = {
         "license_text": "decider by Mapika (https://huggingface.co/Mapika/decider-2b)\n"
                         "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE,
         "tags": {
-            # v2.1: temperature_by_type (choice 1.110, noul 1.560, score 1.287) in decision.json/calibration.json.
-            "4b": _wl("decider-4b", "Mapika/decider-4b", "eb5fbdfc9448473ec25e399882912863afbdb70e",
-                      "Largest decider (Qwen3.5-4B base, v2.1): reads option-letter logits at an answer slot, with one "
+            # v3 and v12 (2026-10-20): temperature_by_type in decision.json/calibration.json (4b: choice 2.098, noul 0.05,
+            # score 3.152; 2b: choice 2.465, noul 0.05, score 2.833). The yes/no temperature is upstream's choice for
+            # JevBench's 0.2-0.8 band rule, so yes/no probabilities come out near 0 or 1.
+            "4b": _wl("decider-4b", "Mapika/decider-4b", "585473dec4fa93f0325c2bf02dda7273b61f44c1",
+                      "Largest decider (Qwen3.5-4B base, v3): reads option-letter logits at an answer slot, with one "
                       "fitted temperature per answer type. Needs about 9 GB of memory.",
                       "4.2B", 32768, ["en"], wl_dir=os.path.join(OUT, "decider-4b")),
-            "2b": _wl("decider-2b", "Mapika/decider-2b", "9839cc9d908be16c5988c0d041034b5fdf82c7a2",
-                      "Decoder decision model (Qwen3.5-2B base): reads option-letter logits at an answer slot. "
-                      "Highest accuracy of the open models Ollaya ships.",
-                      "1.9B", 32768, ["en"], wl_dir=os.path.join(OUT, "decider-2b")),
+            "2b": _wl("decider-2b", "Mapika/decider-2b", "7614a6c7ea5a047aa7d7bcfb1a0015469381c3e3",
+                      "Decoder decision model (Qwen3.5-2B base, v12): reads option-letter logits at an answer slot, with one "
+                      "fitted temperature per answer type.",
+                      "1.9B", 32768, ["en"], wl_dir=os.path.join(OUT, "decider-2b"),
+                      arch={"family": "tied-rows", "config": "config.json"}),
             # v5 text weights in the Qwen3.5-2B vision-language model: `decider-vision-v1`, two graphs
             # (vision.onnx, the image tower; model.onnx, the decoder with M-RoPE positions).
             "2b-vision": _wl("decider-2b-vision", "Mapika/decider-2b-vision", "863e290863655f1d6b69324d77d09ac972d21609",
@@ -258,7 +393,8 @@ CATALOG = {
                              "2.2B", 32768, ["en"], wl_dir=os.path.join(OUT, "decider-2b-vision")),
             "0.8b": _wl("decider-0.8b", "Mapika/decider-0.8b", "a0a01d6f8135298f400a8c856b355793012ae971",
                         "Smaller decider (Qwen3.5-0.8B base): faster, less accurate.",
-                        "0.75B", 32768, ["en"], wl_dir=os.path.join(OUT, "decider-0.8b")),
+                        "0.75B", 32768, ["en"], wl_dir=os.path.join(OUT, "decider-0.8b"),
+                        arch={"family": "tied-rows", "config": "config.json"}),
         },
         "aliases": {"latest": "2b"},
         "parity": "Ollaya's Rust runtime matches the Python reference exactly on 479 questions (902 rows) "
@@ -313,12 +449,29 @@ CATALOG = {
                                   ("Qwen/Qwen3.5-9B", "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
                                    "model.safetensors-%05d-of-00004.safetensors" % i) for i in range(1, 5)},
                                "adapter_model.safetensors": "adapter_model.safetensors"}),
+            # v3 is CC BY-NC 4.0 (v2 Apache-2.0), so `latest` stays on v2. Its tokenizer is v2's file: what
+            # transformers 5 rebuilds from the base, which the author's engine loads (families/nimble/ref_v3.py).
+            "9b-v3": dict(_wl("nimble-9b-v3", "bespokelabs/Bespoke-Nimble-9B-v3", "8e927b9b4afdbb14479fac10a7364d1a695be208",
+                              "Bespoke Labs' Nimble v3: v2's prompts and readout with a new rank-64 LoRA, served as the "
+                              "author's Decision Index engine (softmax at temperature 1, prompts up to 32,768 tokens). "
+                              "Non-commercial license (CC BY-NC 4.0). Needs about 18 GB of memory; best on a 24 GB GPU.",
+                              "9B", 32768, ["en"], wl_dir=os.path.join(OUT, "nimble-9b-v3"),
+                              license="CC-BY-NC-4.0 (adapter) and Apache-2.0 (base model)",
+                              license_text=NIMBLE_V3_LICENSE,
+                              weights={**{"model.safetensors-%05d-of-00004.safetensors" % i:
+                                          ("Qwen/Qwen3.5-9B", "c202236235762e1c871ad0ccb60c8ee5ba337b9a",
+                                           "model.safetensors-%05d-of-00004.safetensors" % i) for i in range(1, 5)},
+                                       "adapter_model.safetensors": "adapter_model.safetensors"}),
+                          tokenizer=("bespokelabs/Bespoke-Nimble-9B-v2", "4b8c04d1ac2cea3e41e5e3c4d2130bcead2c0abe",
+                                     "tokenizer.json")),
         },
         "aliases": {"latest": "9b"},
         "parity": "Ollaya's Rust runtime matches the author's reference code (serving_schema.prepare_prompts and "
                   "inference.candidate_logits, PyTorch fp32 with the LoRA unmerged) on 492 questions from 104 "
                   "requests: identical token rows, the same 4 rejected requests, the same decision on every "
-                  "question, option logits within 1.1e-4 and probabilities within 6.5e-6 (CUDA).",
+                  "question, option logits within 1.1e-4 and probabilities within 6.5e-6 (CUDA). nimble:9b-v3 matches "
+                  "the author's Decision Index engine the same way on 498 questions from 105 requests (3 rejected): "
+                  "option logits within 1.4e-4, probabilities within 1.1e-5 (CUDA).",
     },
     "kev": {
         "namespace": "library",
@@ -334,7 +487,11 @@ CATALOG = {
                         "span, all in one forward pass per question.",
                         "0.76B", 8192, ["en"], wl_dir=os.path.join(OUT, "kev-0.8b-r15"),
                         license_text=_kev_license("kev-0.8b", "Qwen3.5-0.8B-Base"),
-                        weights=_kev_weights("Qwen/Qwen3.5-0.8B-Base", "dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68", 1)),
+                        weights=_kev_weights("Qwen/Qwen3.5-0.8B-Base", "dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68", 1),
+                        # The base's config, the adapter's: the engine merges the LoRA when it loads.
+                        arch={"family": "pointer",
+                              "config": ("Qwen/Qwen3.5-0.8B-Base", "dc7cdfe2ee4154fa7e30f5b51ca41bfa40174e68", "config.json"),
+                              "lora_config": "adapter_config.json"}),
             # Round 10 (2026-09-24): skills delta on round 8.
             "4b": _wl("kev-4b", "jaredpalmer/kev-4b", "139fdd94f1b6a6ad80cc15e08fcb99cac885a101",
                       "Kev on Qwen3.5-4B base (LoRA and pointer head): more accurate than 0.8b out of domain. "
@@ -384,6 +541,168 @@ CATALOG = {
                   "4090): identical token rows, the same 121 rejected requests, the same decision on every question, "
                   "slot scores within 8.5e-5 and probabilities within 1.0e-5.",
     },
+    "strands-decider": {
+        "namespace": "library",
+        "model": "strands-decider",
+        "family": "strands",
+        "author": "Strands Agents (adapter and pointer head), the Qwen team and Google DeepMind (base models)",
+        "license": "Apache-2.0",
+        "license_text": ("Strands Decider by Strands Agents "
+                         "(https://huggingface.co/StrandsAgents/strands-decider-2B-qwen3.5-v1-2610)\n"
+                         "LoRA adapter and pointer head: Apache-2.0 (LICENSE.md in the model repository).\n"
+                         "Base model: Qwen3.5-2B-Base by the Qwen team (https://huggingface.co/Qwen/Qwen3.5-2B-Base), "
+                         "Apache-2.0.\nLicensed under the Apache License, Version 2.0.\n\n") + LICENSE_APACHE,
+        "tags": {
+            "2b": _wl("strands-decider-2b", "StrandsAgents/strands-decider-2B-qwen3.5-v1-2610",
+                      "216d1ccb46a9e9b036eb9187b248db98480f77d4",
+                      "Strands Decider v1 (2610): a LoRA and a pointer head on Qwen3.5-2B base. Each question is one "
+                      "row, every option scored at the end of its own line, calibrated per question type. Up to 255 "
+                      "options and 10 score levels, 4,096 tokens per row. Needs about 8 GB of memory (weights widened to fp32 at load).",
+                      "2B", 4096, ["en"], wl_dir=os.path.join(OUT, "strands-decider-2b"),
+                      weights={"model.safetensors-00001-of-00001.safetensors":
+                               ("Qwen/Qwen3.5-2B-Base", "b1485b2fa6dfa1287294f269f5fb618e03d52d7c",
+                                "model.safetensors-00001-of-00001.safetensors"),
+                               "adapter_model.safetensors": "lora/adapter_model.safetensors",
+                               "head.safetensors": "head.safetensors"}),
+            # v1 2610 on Gemma 4 E (2026-10-09): the same recipe and layout on google/gemma-4-E2B-it and -E4B-it, whose
+            # tokenizer prepends <bos> to the state (layout strands-pointer-v2). The Gemma 4 checkpoints carry the
+            # vision and audio towers too, unused; the text weights are 4.6B (E2B) and 8.9B (E4B), half of them the
+            # per-layer embedding table, read in place as BF16.
+            "e2b": _wl("strands-decider-e2b", "StrandsAgents/strands-decider-E2B-gemma4-v1-2610",
+                       "d383ecf8534b13d49b3b567a1b66f88fca6d50ba",
+                       "Strands Decider v1 (2610) on Gemma 4 E2B: a LoRA and a pointer head on google/gemma-4-E2B-it. "
+                       "Each question is one row, every option scored at the end of its own line, calibrated per "
+                       "question type. Up to 255 options and 10 score levels, 4,096 tokens per row. Needs about 11 GB "
+                       "of memory (BF16 weights in memory, widened per forward pass).",
+                       "4.6B", 4096, ["en"], wl_dir=os.path.join(OUT, "strands-decider-e2b"),
+                       license_text=_STRANDS_GEMMA_LICENSE,
+                       weights={"model.safetensors": ("google/gemma-4-E2B-it", "3e22461f65e89153144f8adb70e3b8c2cc9845a7",
+                                                      "model.safetensors"),
+                                "adapter_model.safetensors": "lora/adapter_model.safetensors",
+                                "head.safetensors": "head.safetensors"}),
+            "e4b": _wl("strands-decider-e4b", "StrandsAgents/strands-decider-E4B-gemma4-v1-2610",
+                       "1344d44397c457f3be34b8ff15c593b41248c6bf",
+                       "Strands Decider v1 (2610) on Gemma 4 E4B: a LoRA and a pointer head on google/gemma-4-E4B-it, "
+                       "the largest Strands Decider Ollaya runs. Up to 255 options and 10 score levels, 4,096 tokens per "
+                       "row. Needs about 20 GB of memory (BF16 weights in memory, widened per forward pass).",
+                       "8.9B", 4096, ["en"], wl_dir=os.path.join(OUT, "strands-decider-e4b"),
+                       license_text=_STRANDS_GEMMA_LICENSE,
+                       weights={"model.safetensors": ("google/gemma-4-E4B-it", "ee0ef6023621cff504d758262d4e04895a5af4a2",
+                                                      "model.safetensors"),
+                                "adapter_model.safetensors": "lora/adapter_model.safetensors",
+                                "head.safetensors": "head.safetensors"}),
+        },
+        "aliases": {"latest": "2b"},
+        "parity": "Ollaya's Rust runtime matches upstream strands_decider (PyTorch fp32, the LoRA unmerged) on 650 "
+                  "questions from 152 requests: identical token rows and option positions, the same 18 rejected "
+                  "requests, the same decision on every question, option logits within 1.1e-5 and probabilities "
+                  "within 2.8e-6 (CUDA), and TypeSafe answers equal to upstream's 4-decimal rounding.",
+    },
+    "sura": {
+        "namespace": "library",
+        "model": "sura",
+        "family": "pplx",
+        "author": "Ollaya (distilled model and readout), Perplexity AI (teacher, protocol and code) and the Qwen team (base model)",
+        "license": "Apache-2.0",
+        "license_text": ("Sura by Ollaya (https://huggingface.co/ollaya-dev)\n"
+                         "Distilled from pplx-decider-flash-v1.2 by Perplexity AI, Apache-2.0; its protocol, processor files and "
+                         "pplx_decider code are in the model repository unchanged (LICENSE and NOTICE there).\n"
+                         "Base models: Qwen3.5-0.8B-Base and Qwen3.5-2B-Base by the Qwen team "
+                         "(https://huggingface.co/Qwen/Qwen3.5-0.8B-Base, https://huggingface.co/Qwen/Qwen3.5-2B-Base), "
+                         "Apache-2.0.\n"
+                         "Licensed under the Apache License, Version 2.0.\n\n") + LICENSE_APACHE,
+        "tags": {
+            "0.8b": _wl("sura-0.8b", "ollaya-dev/sura-0.8b", "9e991faa3250b255cc41d9cd8f5422f1ca9f7694",
+                        "Ollaya's own decoder: Qwen3.5-0.8B-Base distilled from pplx-decider:flash in its joint format. "
+                        "Every question of a request shares one sequence, read at a marker after each question; the "
+                        "full-attention layers see the whole request. Up to 255 options and levels, 8,192 tokens per "
+                        "sequence. Trained zero-shot: none of the benchmark datasets Ollaya reports.",
+                        "0.8B", 8192, ["en"], wl_dir=os.path.join(OUT, "sura-0.8b"),
+                        weights={"model.safetensors": "model.safetensors",
+                                 "readout.safetensors": "readout.safetensors"}),
+            "2b": _wl("sura-2b", "ollaya-dev/sura-2b", "9676c6bd806e792046a895d1ffeb4e03b080bea9",
+                      "Ollaya's own decoder: Qwen3.5-2B-Base distilled from pplx-decider:flash in its joint format. "
+                      "Every question of a request shares one sequence, read at a marker after each question; the "
+                      "full-attention layers see the whole request. Up to 255 options and levels, 8,192 tokens per "
+                      "sequence. Trained zero-shot: none of the benchmark datasets Ollaya reports.",
+                      "2B", 8192, ["en"], wl_dir=os.path.join(OUT, "sura-2b"),
+                      weights={"model.safetensors": "model.safetensors",
+                               "readout.safetensors": "readout.safetensors"}),
+        },
+        "aliases": {"latest": "2b"},
+        "parity": "Ollaya's Rust runtime matches upstream pplx_decider (the reference path, PyTorch fp32) on 696 "
+                  "questions from 138 requests, for each tag: identical token sequences and marker positions, the same "
+                  "5 rejected requests, the same decision on every question, option logits within 3.9e-5 (0.8b) and "
+                  "1.4e-5 (2b) and probabilities within 5.1e-6 (0.8b) and 3.6e-6 (2b) on CUDA.",
+    },
+    "pplx-decider": {
+        "namespace": "library",
+        "model": "pplx-decider",
+        "family": "pplx",
+        "author": "Perplexity AI (post-trained model and readout) and the Qwen team (base model)",
+        "license": "Apache-2.0",
+        "license_text": ("pplx-decider-flash-v1.2 by Perplexity AI (https://huggingface.co/perplexity-ai/pplx-decider-flash-v1.2)\n"
+                         "Model, readout and code: Apache-2.0 (LICENSE and NOTICE in the model repository).\n"
+                         "Base model: Qwen3.5-4B by the Qwen team (https://huggingface.co/Qwen/Qwen3.5-4B), Apache-2.0.\n"
+                         "Licensed under the Apache License, Version 2.0.\n\n") + LICENSE_APACHE,
+        "tags": {
+            "flash": _wl("pplx-decider-flash", "perplexity-ai/pplx-decider-flash-v1.2",
+                         "6d771ad7b5ecff5e93b8fc7b90d4c5ccc341954d",
+                         "pplx-decider-flash v1.2: Qwen3.5-4B post-trained by Perplexity (distilled from its 27B decision "
+                         "models), with a 255-code readout. Every question of a request shares one sequence, read at a "
+                         "marker after each question; the full-attention layers see the whole request. Up to 255 options "
+                         "and levels, 8,192 tokens per sequence. Needs about 9 GB of memory.",
+                         "4B", 8192, ["multilingual"], wl_dir=os.path.join(OUT, "pplx-decider-flash"),
+                         weights={"model-00001-of-00002.safetensors": "model-00001-of-00002.safetensors",
+                                  "model-00002-of-00002.safetensors": "model-00002-of-00002.safetensors",
+                                  "readout.safetensors": "readout.safetensors"}),
+        },
+        "aliases": {"latest": "flash"},
+        "parity": "Ollaya's Rust runtime matches upstream pplx_decider (the reference path, PyTorch fp32) on 696 "
+                  "questions from 138 requests: identical token sequences and marker positions, the same 5 rejected "
+                  "requests, the same decision on every question, option logits within 8.2e-5 and probabilities "
+                  "within 6.8e-6 (CUDA).",
+    },
+    "d3": {
+        "namespace": "library",
+        "model": "d3",
+        "family": "d3",
+        "author": "the vLLM Semantic Router contributors",
+        "license": "Apache-2.0",
+        "license_text": "Decision 3.0 (d3) by the vLLM Semantic Router contributors (https://huggingface.co/vllm-sr)\n"
+                        "Model, readout and code: Apache-2.0 (LICENSE and NOTICE in each model repository).\n"
+                        "A fine-tune of Qwen3.5 by the Qwen team (https://huggingface.co/Qwen), Apache-2.0.\n"
+                        "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE,
+        # Upstream's AutoTokenizer is transformers 5's rebuild of the vocabulary, which equals Nimble v2's file
+        # (families/d3/export.py); the repositories' own tokenizer.json splits combining marks differently.
+        "tags": {tag: dict(_wl("d3-" + tag, "vllm-sr/d3-" + tag, commit,
+                               "d3-%s (Decision 3.0): a fine-tuned %s with a 255-code readout. Every question is its own "
+                               "sequence, read at its last token; the full-attention layers see the whole prompt. Up to "
+                               "255 options, 2 to 10 score levels, 8,192 tokens per question. Text only in Ollaya.%s"
+                               % (tag, base, memory),
+                               params, 8192, ["en"], wl_dir=os.path.join(OUT, "d3-" + tag),
+                               weights={**{f: f for f in shards}, "readout.safetensors": "readout.safetensors"}),
+                           tokenizer=("bespokelabs/Bespoke-Nimble-9B-v2", "4b8c04d1ac2cea3e41e5e3c4d2130bcead2c0abe",
+                                      "tokenizer.json"))
+                 for tag, commit, base, params, memory, shards in [
+                     ("edge", "c454ee39b862248d70abd7f84195d2f54ffe6d43", "Qwen3.5-0.8B (12 of its layers)", "0.6B",
+                      "", ["model-00001-of-00001.safetensors"]),
+                     ("lite", "03560c26f5199c3c04129a2ccb38960c913635e0", "Qwen3.5-0.8B", "0.8B",
+                      "", ["model-00001-of-00001.safetensors"]),
+                     ("nano", "462efc366229ea268cf4eed3738b3fc4415e4817", "Qwen3.5-2B", "2B",
+                      "", ["model.safetensors"]),
+                     ("mini", "bd0090dd758d32ba59ef5c749910a8e87fc4391f", "Qwen3.5-4B", "4B",
+                      " Needs about 9 GB of memory.",
+                      ["model-00001-of-00002.safetensors", "model-00002-of-00002.safetensors"]),
+                     ("flash", "13dc1cc8ef23caefa765907e1d764751e5629f7d", "Qwen3.5-9B", "9B",
+                      " Needs about 18 GB of memory; best on a 24 GB GPU.",
+                      ["model-0000%d-of-00004.safetensors" % i for i in range(1, 5)]),
+                 ]},
+        "aliases": {"latest": "mini"},
+        "parity": "Ollaya's Rust runtime matches upstream d3_runtime (PyTorch fp32) on 696 questions from 151 requests, "
+                  "for each tag: identical token sequences, the same 10 rejected requests, the same decision on every "
+                  "question, option logits within 1.1e-4 and probabilities within 2.4e-5, on CUDA and on the CPU.",
+    },
     "decision": {
         "namespace": "library",
         "model": "decision",
@@ -391,18 +710,19 @@ CATALOG = {
         "author": "the vLLM Semantic Router contributors",
         "license": "Apache-2.0",
         "license_text": "Decision 1.0 by the vLLM Semantic Router contributors "
-                        "(https://huggingface.co/llm-semantic-router)\n"
+                        "(https://huggingface.co/vllm-sr)\n"
                         "A fine-tune of Qwen3.5 by the Qwen team (https://huggingface.co/Qwen), Apache-2.0.\n"
                         "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE,
         "tags": {
             # The backbone and the head are read in place from the author's safetensors.
-            "eos": _wl("decision-eos-0.8b", "llm-semantic-router/Decision-1.0-Eos-0.8B",
+            "eos": _wl("decision-eos-0.8b", "vllm-sr/Decision-1.0-Eos-0.8B",
                        "3c2d632609ceb66f3a13bbc5f77f3ab8cdeebcdd",
                        "Decision 1.0 Eos (fully fine-tuned Qwen3.5-0.8B) with an endpoint head: every option is "
                        "scored at its own last token against the question, in one forward pass per question.",
                        "0.75B", 16384, ["en", "zh"], wl_dir=os.path.join(OUT, "decision-eos-0.8b"),
                        weights={"model.safetensors": "backbone/model.safetensors",
-                                "decision_head.safetensors": "decision_head.safetensors"}),
+                                "decision_head.safetensors": "decision_head.safetensors"},
+                       arch={"family": "endpoint", "config": "backbone/config.json"}),
         },
         "aliases": {"latest": "eos"},
         "parity": "Ollaya's Rust runtime matches the author's code (PyTorch fp32) exactly on 466 questions from 117 "
@@ -422,7 +742,8 @@ CATALOG = {
             "0.6b": _wl("qwen3guard-gen-0.6b", "Qwen/Qwen3Guard-Gen-0.6B", "fada3b2f655b89601929198343c94cd2f64d93cc",
                         "Safety guard (Qwen3Guard-Gen-0.6B) with built-in questions: safe, controversial or unsafe, "
                         "and the unsafe category.",
-                        "0.6B", 32768, ["multilingual"], wl_dir=os.path.join(OUT, "qwen3guard-gen-0.6b")),
+                        "0.6B", 32768, ["multilingual"], wl_dir=os.path.join(OUT, "qwen3guard-gen-0.6b"),
+                        arch={"family": "tied-rows", "config": "config.json"}),
         },
         "aliases": {"latest": "0.6b"},
         "parity": "Ollaya's Rust runtime matches the transformers fp32 reference exactly on 74 texts (148 rows, "
@@ -510,6 +831,12 @@ CATALOG = {
                          "Winnow-E4B (Gemma 4 E4B IT fine-tune), Q8_0 GGUF on llama.cpp: option-label logits "
                          "after Winnow's own prompt, with the author's fitted temperature.",
                          "7.5B", ["multilingual"], notice="NOTICE"),
+            # The author fitted no temperature for E2B (its direct scores are read at T = 1).
+            "e2b": _gguf("winnow-e2b-q8_0", "EldanRing/Winnow-E2B", "00b4d4ea1412bebe1ff22e4875e580acdf150769",
+                         "gguf/Winnow-E2B-Q8_0.gguf",
+                         "Winnow-E2B (Gemma 4 E2B IT fine-tune), Q8_0 GGUF on llama.cpp: option-label logits "
+                         "after Winnow's own prompt, uncalibrated. The smallest Winnow (5 GB).",
+                         "4.6B", ["multilingual"], notice="NOTICE"),
             # Opt-in images: each text tag's GGUF, decision and calibration plus its matching projector from the
             # same revision, read through libmtmd. The text tags keep their downloads and inference path.
             "12b-vision": dict(_gguf("winnow-12b-q8_0", "EldanRing/Winnow-12B", "b6ac22b0d51b69b18200acacb3fbdd98073fffe8",
@@ -598,8 +925,9 @@ CATALOG = {
                          "Base model: Qwen3.5-9B by the Qwen team, Apache-2.0.\n"
                          "Licensed under the Apache License, Version 2.0.\n\n") + LICENSE_APACHE,
         "tags": {
-            # No-thinking mode: the pointer head reads the option markers after an empty thought.
-            "9b": dict(_wl("jeeves-9b", "PostHog/jeeves", "8622b7d1652a9dcb8629486b84dce9e8d690c5cd",
+            # No-thinking mode: the pointer head reads the option markers after an empty thought. Jeeves v2 since
+            # COB-562; v1 was PostHog/jeeves@8622b7d1652a9dcb8629486b84dce9e8d690c5cd.
+            "9b": dict(_wl("jeeves-9b", "PostHog/jeeves", "04b9f87a79484fda54131de3b030b579d399e704",
                            "PostHog's Jeeves-9B without its reasoning chain: Qwen3.5-9B (LoRA merged) and a pointer head "
                            "that scores every option at its own marker, calibrated. Needs about 18 GB of memory.",
                            "9B", 8192, ["en"], wl_dir=os.path.join(OUT, "jeeves-9b"),
@@ -610,8 +938,8 @@ CATALOG = {
         "aliases": {"latest": "9b"},
         "parity": "Ollaya's Rust runtime matches the authors' own code (their Qwen3.5 model and pointer head, fp32, no "
                   "thinking) on 430 questions from 107 requests, on CUDA: identical token rows and option positions, the "
-                  "same 16 rejected requests, the same decision on every question, scores within 1.9e-4 and "
-                  "probabilities within 1.4e-5.",
+                  "same 16 rejected requests, the same decision on every question, scores within 7.8e-5 and "
+                  "probabilities within 5.8e-6. On the CPU the smoke cases (44 questions) agree too.",
     },
     "clef": {
         "namespace": "library",
@@ -653,27 +981,30 @@ CATALOG = {
                         "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE,
         "tags": {
             # The authors' own GGUF files, pinned; Q8_0 for 4b and 9b (the files they checked against bf16:
-            # 256/260 and 257/260), Q4_K_M for 27b so it fits a 24 GB GPU (29 GB at Q8_0).
+            # 256/260 and 257/260 for v2), Q4_K_M for 27b so it fits a 24 GB GPU (29 GB at Q8_0). 9b and 27b are v2.1,
+            # which the authors' v2 cards now name as the version to use; there is no 4B v2.1. Until then 9b was
+            # frontier-infra/jebadiah-9b-v2-GGUF@adaec6b3d1f0421706deb49fa275ab49093982ff (jebadiah-9b-v2-Q8_0.gguf)
+            # and 27b frontier-infra/jebadiah-27b-GGUF@7451e611a20ce3f56dd7d87f78c8a25b736c08f5 (jebadiah-27b-Q4_K_M.gguf).
             "4b": _gguf("jebadiah-4b-q8_0", "frontier-infra/jebadiah-4b-v2-GGUF", "7f671f9a31827257c26401000484e154b39417e6",
                         "jebadiah-4b-v2-Q8_0.gguf",
                         "Jebadiah 4B v2 (Qwen3.5-4B, LoRA merged), Q8_0 GGUF on llama.cpp: the option letters' logits "
                         "after AINode's decision prompt, with the authors' per-type temperatures.",
                         "4B", ["en"]),
-            "9b": _gguf("jebadiah-9b-q8_0", "frontier-infra/jebadiah-9b-v2-GGUF", "adaec6b3d1f0421706deb49fa275ab49093982ff",
-                        "jebadiah-9b-v2-Q8_0.gguf",
-                        "Jebadiah 9B v2 (Qwen3.5-9B, LoRA merged), Q8_0 GGUF: the authors' recommended local model.",
+            "9b": _gguf("jebadiah-9b-v2-1-q8_0", "frontier-infra/jebadiah-9b-v2-1-GGUF",
+                        "2182dd8d70b09ffdce5b68b0ddf6c4591bf38810", "jebadiah-9b-v2-1-Q8_0.gguf",
+                        "Jebadiah 9B v2.1 (Qwen3.5-9B, LoRA merged), Q8_0 GGUF: the authors' recommended local model.",
                         "9B", ["en"]),
-            "27b": _gguf("jebadiah-27b-q4_k_m", "frontier-infra/jebadiah-27b-GGUF", "7451e611a20ce3f56dd7d87f78c8a25b736c08f5",
-                         "jebadiah-27b-Q4_K_M.gguf",
-                         "Jebadiah 27B (Qwen3.8-27B, LoRA merged), Q4_K_M GGUF (17 GB, fits a 24 GB GPU): the most "
-                         "accurate Jebadiah.",
+            "27b": _gguf("jebadiah-27b-v2-1-q4_k_m", "frontier-infra/jebadiah-27b-v2-1-GGUF",
+                         "ed71f41b8b59e8832c53982cd26e0879824e979c", "jebadiah-27b-v2-1-Q4_K_M.gguf",
+                         "Jebadiah 27B v2.1 (Qwen3.8-27B, LoRA merged), Q4_K_M GGUF (17 GB, fits a 24 GB GPU): the "
+                         "most accurate Jebadiah.",
                          "27B", ["en"]),
         },
         "aliases": {"latest": "9b"},
         "parity": "Ollaya's runner matches stock llama-server of the pinned build (b11146) on the same GGUF, CUDA "
-                  "(RTX 4090): 494 questions per model, every decision the same, option logits within 7.7e-6 and "
-                  "probabilities within 2.4e-6. The prompts are identical to the authors' jebadiah_prompt.Renderer "
-                  "on 1,349 test prompts.",
+                  "(RTX 5090, v2.1; 4b on an RTX 4090): 494 questions per model, every decision the same, option "
+                  "logits within 7.7e-6 and probabilities within 2.8e-6. The prompts are identical to the authors' "
+                  "jebadiah_prompt.Renderer on 1,349 test prompts.",
     },
     "jevk5": {
         "namespace": "library",
@@ -732,16 +1063,19 @@ CATALOG = {
         "family": "decima",
         "author": "A. M. Madani (amyrmahdy)",
         "license": "Apache-2.0",
-        "license_text": ("Decima-small, Decima-base and Decima-agent by A. M. Madani "
-                         "(https://huggingface.co/amyrmahdy, https://github.com/amyrmahdy/decima), Apache-2.0.\n"
+        "license_text": ("Decima-small, Decima-base, Decima-base-clean, Decima-agent, Decima-guard and Decima-guard-small by "
+                         "A. M. Madani (https://huggingface.co/amyrmahdy, https://github.com/amyrmahdy/decima), "
+                         "Apache-2.0.\n"
                          "Base models: multilingual-e5-small by intfloat "
-                         "(https://huggingface.co/intfloat/multilingual-e5-small) for Decima-small, and mmBERT-base "
-                         "by JHU CLSP (https://huggingface.co/jhu-clsp/mmBERT-base) for Decima-base and "
-                         "Decima-agent, both MIT License.\n"
+                         "(https://huggingface.co/intfloat/multilingual-e5-small) for Decima-small, mmBERT-base "
+                         "by JHU CLSP (https://huggingface.co/jhu-clsp/mmBERT-base) for Decima-base, Decima-base-clean, "
+                         "Decima-agent and Decima-guard, and mmBERT-small by JHU CLSP "
+                         "(https://huggingface.co/jhu-clsp/mmBERT-small) for Decima-guard-small, all MIT License.\n"
                          "Licensed under the Apache License, Version 2.0.\n\n") + LICENSE_APACHE,
         # The fp32 PyTorch checkpoint under pytorch/ of each repository, the encoder and the late-interaction
-        # head in two files; the author's int8 ONNX exports are not used. The code is the GitHub tag v2.2.0
-        # (efaefe2a), which released agent 2.2; small, base and agent 2.1 were exported against v1.1.1 (2df60942).
+        # head in two files; the author's int8 ONNX exports are not used. The code is the GitHub tag v2.3.0
+        # (1b07634e), which released agent 2.3 and guard; small, base and agent 2.1 were exported against v1.1.1
+        # (2df60942), agent 2.2 against v2.2.0 (efaefe2a).
         "tags": {
             "small": _decima("decima-small", "2e7f4d0757df0215f48f2a9b2b589e1f3a6348ed",  # HF tag v1.1.1
                              "A. M. Madani's Decima-small 1.1: multilingual-e5-small with a late-interaction "
@@ -752,19 +1086,52 @@ CATALOG = {
                             "A. M. Madani's Decima-base 2.0: mmBERT-base with Decima's late-interaction scorer "
                             "and ordinal head, with the author's temperature. 321M parameters, multilingual.",
                             "321M", 512),
-            # HF tag v2.2 (2026-10-08), decima.json with choice_fit (decima-late-interaction-v2); v2.1 was
-            # 86a07aab1c340fa5869bdb754e57d3851a1d288a.
-            "agent": _decima("decima-agent", "5c14a460ff368b5bf3aaf086d1ab46292d668e32",
-                             "A. M. Madani's Decima-agent 2.2: Decima-base fine-tuned for the decisions inside "
+            # HF tag v1.0, decima.json with choice_fit (decima-late-interaction-v2), 512-token states.
+            "base-clean": _decima("decima-base-clean", "35eb218bdeeb8c450baba4159ebc08b67c4d632c",
+                                  "A. M. Madani's Decima-base-clean 1.0: Decima-base's network (mmBERT-base, 321M) "
+                                  "trained without non-commercial data and without the BTZSC benchmark's, for "
+                                  "commercial use and honest zero-shot numbers; decima:base is stronger on routing, "
+                                  "intent and NLI questions.",
+                                  "321M", 512),
+            # HF tag v2.3, decima.json with choice_fit (decima-late-interaction-v2) and 8,192-token states; v2.2
+            # (2,048 tokens) was 5c14a460ff368b5bf3aaf086d1ab46292d668e32, v2.1 86a07aab1c340fa5869bdb754e57d3851a1d288a.
+            "agent": _decima("decima-agent", "652d90ac9d33088edd730692c95f1da381cb9174",
+                             "A. M. Madani's Decima-agent 2.3: Decima-base fine-tuned for the decisions inside "
                              "a coding agent's loop (secret and command gates, tool, command and model choice) "
-                             "and knowledge-graph judgments. States up to 2,048 tokens.",
+                             "and knowledge-graph judgments. States up to 8,192 tokens.",
+                             "321M", 8192),
+            # HF tag v1.0-preview, decima.json with choice_fit (decima-late-interaction-v2), 2,048-token states.
+            "guard": _decima("decima-guard", "98d3f734c8323cb390d9ad750e1a606a8dd56f09",
+                             "A. M. Madani's Decima-guard 1.0 preview: a guard for LLM apps on Decima-base-clean "
+                             "(mmBERT-base) that checks user messages, tool results and model replies for prompt "
+                             "injection, jailbreaks, leaks and harmful content (the OWASP Top 10 for LLM "
+                             "applications), trained for English, Arabic and Persian. 321M parameters. States up "
+                             "to 2,048 tokens.",
                              "321M", 2048),
+            "guard-small": _decima("decima-guard-small", "ac11024887d51e9b7b9522b3b8ccc2d78ce7353d",  # v1.0-preview
+                                   "A. M. Madani's Decima-guard-small 1.0 preview: Decima-guard's checks and "
+                                   "training data on mmBERT-small, for when speed matters more than the last few "
+                                   "points. 140M parameters. States up to 2,048 tokens.",
+                                   "140M", 2048),
         },
         "aliases": {"latest": "base"},
-        "parity": "Ollaya's Rust runtime matches the author's own code (decima/model.py, render.py and systemone.py, "
-                  "fp32) on 581 questions from 122 requests for each of small and base, and 591 questions from 132 "
-                  "requests for agent 2.2, ten of them too long for the option window, on CPU and CUDA (RTX 4090 and "
-                  "RTX 5090): identical token rows and truncation, the same 18 rejected requests, the same decision "
-                  "on every question, scores within 2.2e-5 and probabilities within 5.4e-6.",
+        "parity": "Ollaya's Rust runtime matches the author's own code at v2.3.0 (decima/model.py, render.py and "
+                  "systemone.py, fp32) on 599 questions from 154 requests for each of small, base, agent 2.3, guard "
+                  "and guard-small, on CPU and CUDA (RTX 4090): identical token rows and truncation, the same 18 "
+                  "rejected requests, the same decision on every question, scores within 3.2e-5 and probabilities "
+                  "within 8.2e-6. Agent's states run to 8,192 tokens: rows of 3,041, 5,986 and 8,076 tokens are "
+                  "kept whole, and one of 8,266 is truncated.",
     },
 }
+
+# The -fp16 GPU tags (docs/decisions/0008-fp16-decoder-tags.md): the same weights and tokenizer as the base tag, a
+# graph that computes the trunk in fp16. Each passed its own parity gate before it was added here. kev:0.8b has none:
+# after the Split rewrite its fp32 graph is as fast on an RTX 5090 (67 ms fp16, 62 ms fp32), so fp16 bought nothing.
+for _model, _tag in [("kev", "4b"), ("kev", "9b"), ("nimble", "9b"), ("clef", "flash"),
+                     ("pplx-decider", "flash"), ("strands-decider", "2b")]:
+    _t = CATALOG[_model]["tags"][_tag]
+    CATALOG[_model]["tags"][_tag + "-fp16"] = dict(
+        _t, wl_dir=_t["wl_dir"] + "-fp16", precision="fp16", arch=None,
+        description=_t["description"] + " This tag computes in fp16 on NVIDIA GPUs: faster than %s:%s, with at least "
+                    "99.5 %% of its decisions the same. On a CPU it runs, slowly; use %s:%s there."
+                    % (_model, _tag, _model, _tag))

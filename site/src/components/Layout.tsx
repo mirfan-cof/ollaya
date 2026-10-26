@@ -2,19 +2,23 @@ import type { Child } from 'hono/jsx'
 import { asset } from '../lib/assets'
 import { ANALYTICS, SITE_DESCRIPTION, SITE_NAME, TAGLINE } from '../site'
 import { Footer } from './Footer'
-import { Header, type NavKey } from './Header'
+import { Header, type PageNav } from './Header'
 
 export interface PageMeta {
   /** Page title without the site suffix. Omit on the home page. */
   title?: string
   description?: string
   /** Highlighted top-nav item. */
-  nav?: NavKey
+  nav?: PageNav
+  /** The page lays itself out (the home page, with its own frames and full-bleed hero). */
+  fullBleed?: boolean
   /** Hide the navbar search box (the /search page has its own). */
   hideNavSearch?: boolean
   noindex?: boolean
   /** Social card under /static (default og.png), e.g. "og/laya.png" for a model's pages. */
   ogImage?: string
+  /** schema.org structured data, written as a JSON-LD script. */
+  jsonLd?: object
 }
 
 export interface LayoutProps {
@@ -40,9 +44,8 @@ export function Layout({ origin, path, meta, children }: LayoutProps) {
         <title>{title}</title>
         <meta name="description" content={description} />
         {meta.noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={canonical} />}
-        <meta name="color-scheme" content="light dark" />
-        <meta name="theme-color" media="(prefers-color-scheme: light)" content="#ffffff" />
-        <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0a0a0a" />
+        <meta name="color-scheme" content="dark" />
+        <meta name="theme-color" content="#0a0a0a" />
         <meta property="og:site_name" content={SITE_NAME} />
         <meta property="og:type" content="website" />
         <meta property="og:title" content={meta.title ?? `${SITE_NAME} · ${TAGLINE}`} />
@@ -55,13 +58,26 @@ export function Layout({ origin, path, meta, children }: LayoutProps) {
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:image" content={ogImage} />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
-        {ANALYTICS.key ? (
+        {meta.jsonLd ? (
+          // `<` escaped so no string in the data can close the script element.
+          <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(meta.jsonLd).replaceAll('<', '\\u003c') }}></script>
+        ) : null}
+        {/* /try promises that nothing typed leaves the page: no analytics there (its click events would carry the text of what was clicked). */}
+        {ANALYTICS.key && path !== '/try' ? (
           <script async src={ANALYTICS.src} data-key={ANALYTICS.key} data-collector={ANALYTICS.collector}></script>
         ) : null}
         <link rel="stylesheet" href={asset('app.css')} />
+        <link rel="alternate" type="application/rss+xml" href="/blog/rss.xml" />
         <script src={asset('app.js')} defer></script>
+        {meta.fullBleed ? (
+          <>
+            <script src={asset('chart.js')} defer></script>
+            <script src={asset('demo.js')} defer></script>
+          </>
+        ) : null}
       </head>
       <body class="flex min-h-screen flex-col bg-canvas font-sans text-body antialiased">
+        <div class="grain" aria-hidden="true"></div>
         <a
           href="#main"
           class="sr-only rounded-full bg-btn px-4 py-2 text-sm text-btn-fg focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60]"
@@ -69,7 +85,7 @@ export function Layout({ origin, path, meta, children }: LayoutProps) {
           Skip to content
         </a>
         <Header active={meta.nav} hideSearch={meta.hideNavSearch} />
-        <main id="main" class="flex-1">
+        <main id="main" class={meta.fullBleed ? 'flex-1 border-b border-line' : 'frame flex-1 border-b border-line pt-14'}>
           {children}
         </main>
         <Footer />

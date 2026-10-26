@@ -26,6 +26,8 @@ Each release on GitHub (`ollaya-dev/ollaya`, set with `OLLAYA_REPO`) carries:
 | `ollaya-linux-amd64-cuda.sha256` | The sha256 of every library in `lib/ollaya/cuda_v13/`, also installed there as `FILES.sha256` | 2 KiB |
 | `ollaya-linux-amd64-cuda12.tar.zst` | `lib/ollaya/cuda_v12/` (21 libraries, llama.cpp's CUDA 12.8 `libggml-cuda.so` included), `share/doc/ollaya/cuda_v12/`, for drivers without CUDA 13 support | 1568 MiB (3370 MiB unpacked) |
 | `ollaya-linux-amd64-cuda12.sha256` | The same for `lib/ollaya/cuda_v12/` | 2 KiB |
+| `ollaya-linux-amd64-rocm.tar.zst` | `lib/ollaya/rocm/libggml-hip.so` (llama.cpp ROCm/HIP backend), `share/doc/ollaya/rocm/` | about 46 MiB (1053 MiB unpacked) |
+| `ollaya-linux-amd64-rocm.sha256` | The sha256 of `libggml-hip.so`, also installed there as `FILES.sha256` | 1 KiB |
 | `ollaya-linux-arm64.tar.zst` | `bin/ollaya` (CPU only), `lib/ollaya/llama/`, `lib/ollaya/ollaya-cuda-runner` (the GPU runner), `share/doc/ollaya/` | |
 | `ollaya-linux-arm64-cuda.tar.zst`, `ollaya-linux-arm64-cuda.sha256` | `lib/ollaya/cuda_v13/` for aarch64 (DGX Spark; see "The linux-arm64 pack" below), `share/doc/ollaya/cuda_v13/`, and its checksums | |
 | `ollaya-darwin-arm64.tar.zst` | `bin/ollaya`, `lib/ollaya/llama/` (llama.cpp with Metal), `share/doc/ollaya/` (CPU and CoreML) | |
@@ -208,6 +210,7 @@ sha256 (llama.cpp v0.5.0, build b11146):
 | `lib/ollaya/cuda_v13/libggml-cuda.so` (linux-arm64) | the CUDA 13.4 backend | `llama-b11146-bin-ubuntu-cuda-13.4-arm64.tar.gz`, the same build (commit and ggml backend interface) |
 | `lib/ollaya/llama/` (darwin-arm64) | `libllama.0.dylib`, `libggml*.0.dylib` (Metal built in, shaders embedded, macOS 13.3 or newer) | `llama-b11146-bin-macos-arm64.tar.gz` |
 | `lib/ollaya/llama/` (windows-amd64) | `llama.dll`, `ggml.dll`, `ggml-base.dll`, `ggml-vulkan.dll`, the `ggml-cpu-*.dll` variants and `libomp.dll` | `llama-b11146-bin-win-vulkan-x64.zip` |
+| `lib/ollaya/rocm/libggml-hip.so` (linux-amd64) | the ROCm/HIP backend | `llama-b11146-bin-ubuntu-rocm-10.0-x64.tar.gz`, the same build |
 
 - **Nothing else.** No `llama-server`, no tools, no symbolic links: each library is stored once,
   under the name the loader asks for.
@@ -215,6 +218,16 @@ sha256 (llama.cpp v0.5.0, build b11146):
   `<exe dir>/../lib/ollaya/llama`). ggml loads the best CPU variant for the machine. The CUDA backend
   is found next to a GPU runner's `argv[0]`, the CUDA pack, where it links the pack's `libcudart`,
   `libcublas` and `libcublasLt` through its `$ORIGIN` RUNPATH.
+- **AMD ROCm / HIP.** `libggml-hip.so` lives in the optional ROCm pack (`lib/ollaya/rocm/`) and is loaded
+  dynamically by the runner. The archive ships only `libggml-hip.so`; it requires ROCm 7 runtime libraries
+  installed on the host (`libamdhip64.so.7`, `libhipblas.so.3` and `librocblas.so.5`). With
+  `OLLAYA_DEVICE=auto`, GGUF models prioritize CUDA, then discrete ROCm GPUs over generic Vulkan or CPU. An
+  explicit `OLLAYA_DEVICE=rocm` or `rocm:<n>` targets a specific AMD card. If a GPU runner fails while it
+  loads, the model starts again on the CPU.
+- **ROCm parity**, per device as for every backend (docs/decisions/0003-llama-cpp-runtime.md, point 7):
+  Ollaya's runner against stock `llama-server` b11146 on the same ROCm device. On an AMD Radeon RX 9070
+  (`gfx1201`): `winnow:e4b` 505/505 decisions (100%), option logits within 1.25e-5
+  ([measurements](measurements/amd-rx9070-rocm-parity.md)).
 - **Windows Vulkan.** `ggml-vulkan.dll` lives beside the CPU libraries and is loaded by llama.cpp's
   backend discovery. With `OLLAYA_DEVICE=auto`, GGUF models use CUDA when its optional pack is
   installed, else a discrete Vulkan GPU. An integrated GPU shares system memory and is not shown to
@@ -302,7 +315,9 @@ dependencies through `LD_LIBRARY_PATH`. The provider has no RUNPATH:
 ### What the daemon must do
 
 1. **Find the library directory**, first match wins:
-   1. `$OLLAYA_LIBRARY_PATH`, if set. This override is only a proposal, for development.
+   1. `$OLLAYA_LIBRARY_PATH`, if set: a directory, or a list of them like `PATH`, each lookup
+      taking the first that has what it looks for (the desktop app, below). This override is
+      only a proposal, for development.
    2. `dirname(current_exe())/../lib/ollaya`. That gives `/usr/local/lib/ollaya` for the tarball,
       `~/.local/lib/ollaya` for a user install and `/usr/lib/ollaya` in the Docker image.
       `std::env::current_exe()` already resolves symlinks.
@@ -361,7 +376,9 @@ so `GetRuntimePath()` is the pack itself (see above). `argv[0]` and `LD_LIBRARY_
 before. On Windows the runner copy inside the pack is made from `ollaya-cuda-runner.exe`, with
 `ORT_DYLIB_PATH=<pack>\onnxruntime.dll`. A pack that holds ONNX Runtime but has no runner next to
 it is not used. The runner is in the base archive, not the pack, so the pack's `FILES.sha256`
-still changes only when a library changes.
+still changes only when a library changes. A runner in a directory of `$OLLAYA_LIBRARY_PATH`
+comes before the one next to the pack: the desktop app starts its own with a command-line
+install's pack.
 
 ONNX models on the CPU still start from `bin/ollaya`, plainly (no `argv[0]` or environment
 changes), so CPU numbers do not depend on the pack: `OLLAYA_DEVICE=cpu` starts them there, and
@@ -499,13 +516,13 @@ Models for the service live in `/usr/share/ollaya/.ollaya/models` (`OLLAYA_MODEL
 change settings, run `sudo systemctl edit ollaya` and add `Environment=` lines: the drop-in it
 writes outlives updates, while a line added to the unit itself does not.
 
-To uninstall:
-
-```sh
-sudo systemctl disable --now ollaya && sudo rm /etc/systemd/system/ollaya.service
-sudo rm -rf /usr/local/bin/ollaya /usr/local/lib/ollaya /usr/local/share/doc/ollaya
-sudo userdel -r ollaya    # also deletes /usr/share/ollaya, including the models
-```
+To uninstall, run the script with `--uninstall` (`curl -fsSL https://ollaya.dev/install.sh | sh -s --
+--uninstall`). It finds the install in `/usr/local`, or in `~/.local` when only that has one
+(`OLLAYA_INSTALL_DIR` names another prefix). It removes the systemd service when its unit runs that
+binary, stops the user's background server, and deletes `bin/ollaya`, `lib/ollaya`,
+`share/doc/ollaya` and `share/ollaya/skills`. It keeps the models, the `ollaya` user and the
+service's drop-ins, and prints how to delete them: `sudo userdel -r ollaya` removes
+`/usr/share/ollaya` with the service's models, and `rm -rf ~/.ollaya` removes your own.
 
 ### Testing install.sh locally
 
@@ -573,6 +590,12 @@ $env:OLLAYA_NO_CUDA = '1'; irm https://ollaya.dev/install.ps1 | iex   # CPU only
 separate Cargo workspace, so the engine's builds and CI never pull in the webview stack
 (WebKitGTK on Linux).
 
+- **The window:** two pages. Overview shows the server's address, its API endpoints, requests,
+  requests per second, the median response time and the latest requests (`GET /api/activity`).
+  Models shows the library as cards; each opens a page with its versions, a panel to try it and its
+  model card. The library comes from `https://ollaya.dev/data/library.json`, which the site build
+  writes, so a model added to the site appears in the app without a new release.
+
 - **macOS:** a menu bar app (`src-tauri/src/tray.rs`): no Dock icon until the window is open,
   and a menu with the server's state, Start/Stop, the installed models (checked when loaded;
   click to load or unload), downloads, Open at Login (a LaunchAgent) and Quit. Windows and Linux
@@ -580,21 +603,36 @@ separate Cargo workspace, so the engine's builds and CI never pull in the webvie
 - **The engine inside:** `desktop.yml` builds `ollaya` for the target and copies it to
   `desktop/src-tauri/binaries/ollaya-<target triple>`, which Tauri bundles next to the app
   (`externalBin`). The app runs `ollaya serve` from there, and `ollaya stop` for the server it
-  started when it quits.
-- **CPU only.** The engine inside is built without the `cuda` feature on every platform (on Windows
-  with pyke's `directml` set, whose `DirectML.dll` the app bundles), and the installers carry no GPU
-  pack. Using an installed pack would take three things: building the engine with
-  `ollaya-runner/cuda` while leaving the provider DLLs out of the bundle's resources, a pack
-  location the app's engine looks in (its `..\lib\ollaya\cuda_v13` is not the command line's), and
-  a way to get the pack (the command line's `install.ps1`, or a download from the app with the same
-  `FILES.sha256` check). The runner copy is already safe for a pack shared with the command line.
+  started when it quits. In a release, the Windows build takes the engine from the windows-amd64
+  archive `release.yml` has just packaged instead (its `bin\`), and compiles the app while it waits
+  for it.
+- **GPU.** The installers carry no GPU pack (1.4 GB and more). The engine inside is built without
+  the `cuda` feature (on Windows with pyke's `directml` set, whose `DirectML.dll` the app bundles),
+  except the released Windows one, which is the command line's. On Windows and Linux the app uses
+  the pack `install.ps1` or `install.sh` put next to a command-line `ollaya`, in this order:
+  - **The bundled server, with the pack.** The released Windows app carries the release's GPU
+    runner (`lib\ollaya\ollaya-cuda-runner.exe`) and its packs' `FILES.sha256`
+    (`cuda_v13.FILES.sha256`, `cuda_v12.FILES.sha256`). When the installed pack's `FILES.sha256` is
+    the same, as `install.ps1` decides to keep a pack, the app starts its own `ollaya serve` with
+    `OLLAYA_LIBRARY_PATH=<app>\lib\ollaya;<install>\lib\ollaya`: llama.cpp and the GPU runner
+    come from the app, the pack from the install. GPU runners start from a copy of the app's
+    runner in the pack, named by its hash, so it never replaces the command line's. A pack of
+    another release is not used: its ONNX Runtime and llama.cpp may not be the ones the app's
+    runner was built for.
+  - **The command line's server**, when that `ollaya` is at least as new as the app (#44).
+  - **Otherwise the CPU**, with a line in `server.log` that says why.
+
+  The Linux app carries no runner yet, so it has only the second. Downloading the pack from the
+  app (with the same `FILES.sha256` check) is not done either.
 - **Installers:** `Ollaya-macos-arm64.dmg`, `Ollaya-windows-x64-setup.exe` (NSIS, per-user),
   `Ollaya-windows-x64.msi`, `Ollaya-linux-x86_64.AppImage` and `Ollaya-linux-amd64.deb`. The names are
-  stable, so the website links `releases/latest/download/<name>`. A `v*` tag attaches them to its
-  release.
+  stable, so the website links `releases/latest/download/<name>`. For a `v*` tag `release.yml` runs
+  `desktop.yml` and attaches them once the release exists; `desktop.yml` on its own
+  (workflow_dispatch) builds them as workflow artifacts.
 - **Developing:** `cd desktop && npm ci`, copy a built `ollaya` into `src-tauri/binaries/` under its
   triple name, then `npx tauri dev`. `npm run preview` builds the page against a fake backend for
-  design work in a browser.
+  design work in a browser. `OLLAYA_LIBRARY_URL` points the app at another library, such as
+  `site/dist/data/library.json` served locally before the site is deployed.
 
 ### Signing the desktop app
 
@@ -648,6 +686,9 @@ A prerelease tag (one with `-`) only gets the versioned tags.
   `/usr`.
 - The `cuda` target adds a stage that runs `package.sh --cuda --stage` (with `uvx pip`), and the
   `cuda12` target one that runs `package.sh --cuda12 --stage`.
+- `release.yml` builds `:cuda12` from the `cuda12-release` target instead: the `ollaya-linux-amd64`
+  and `-cuda12` archives its build job has just packaged, unpacked into the build context
+  `archives`, with no Rust build in Docker. `cuda12` stays the target for local builds.
 - So the images hold exactly the tarballs' files, and the library contract above applies unchanged
   (`/usr/bin/ollaya`, `/usr/lib/ollaya/cuda_v13` or `cuda_v12`).
 
@@ -734,6 +775,10 @@ volumes:
    - `curl -fsSL https://ollaya.dev/install.sh | OLLAYA_VERSION=0.1.0 sh`
    - `docker run --rm ghcr.io/ollaya-dev/ollaya:0.1.0 --version`
    - The `/download` page.
+   - The decision integration corpus against the installed release, on a GPU machine:
+     `python -m ollaya_convert.integration check` (every model in `results/integration/`). A changed
+     decision fails it, with the model, the request and the question named. Record a new model's file with
+     `record` from the release that adds it.
 6. **Roll back.** Mark the previous release as latest, or delete the bad one; `install.sh` follows
    GitHub's latest flag. Point the image tags back with
    `docker buildx imagetools create -t …:latest …:<previous>`, and the same for `:cuda` and `:cuda12`.

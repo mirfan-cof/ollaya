@@ -106,6 +106,17 @@ def _rotate_half(x):
     return torch.cat((-x[..., h:], x[..., :h]), dim=-1)
 
 
+def half_trunk(trunk):
+    """fp16 compute for an exported trunk: weights and activations in fp16, while the RMSNorms, the gated
+    delta rule and the attention softmax stay fp32, as HF's modules and this file upcast them. The rotary
+    frequencies and the doubling masks stay fp32 (fp16 positions are off by whole radians at 8,000 tokens)."""
+    keep = dict(trunk.named_buffers(recurse=False))   # rotary tables and masks, in every trunk
+    trunk.half()
+    for k, v in keep.items():
+        setattr(trunk, k, v)
+    return trunk
+
+
 class Qwen35Trunk(nn.Module):
     """input_ids [B, T] -> last hidden state [B, T, hidden] (after the final norm), positions 0..T-1.
 
@@ -164,7 +175,9 @@ class Qwen35Trunk(nn.Module):
         o = o * torch.sigmoid(gate)
         return mod.o_proj(o)
 
-    def forward(self, input_ids):
+    def forward(self, input_ids, bias=None):
+        """`bias`: the full-attention layers' additive mask, broadcast to [B, heads, T, T]; causal when None.
+        The linear-attention layers are causal either way."""
         m = self.m
         x = m.embed_tokens(input_ids)
         T = input_ids.shape[1]
@@ -172,7 +185,8 @@ class Qwen35Trunk(nn.Module):
         freqs = pos[:, None] * self.inv_freq[None, :]
         emb = torch.cat((freqs, freqs), dim=-1)
         cos, sin = emb.cos().to(x.dtype), emb.sin().to(x.dtype)
-        bias = torch.full((T, T), float("-inf"), device=x.device, dtype=x.dtype).triu(1)
+        if bias is None:
+            bias = torch.full((T, T), float("-inf"), device=x.device, dtype=x.dtype).triu(1)
         for layer, kind in zip(m.layers, self.layer_types):
             h = layer.input_layernorm(x)
             if kind == "linear_attention":

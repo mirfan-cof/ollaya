@@ -36,6 +36,11 @@ pub trait Engine: Send + Sync {
         false
     }
 
+    /// The model has an ordinal head, so it answers choices asked with `"ordinal": true` (Decima).
+    fn ordinal(&self) -> bool {
+        false
+    }
+
     /// Answer a request that may come with images (encoded files, as the caller sent them).
     /// Only vision models read them; the others answer text-only requests.
     fn run_images(
@@ -60,6 +65,24 @@ impl Engine for OnnxModel {
 /// Padded tokens per `session.run`. Rows are independent, so splitting a request only bounds
 /// peak memory: 64 rows of 512 tokens fit comfortably even for large encoders on the GPU.
 pub const TOKEN_BUDGET: usize = 32_768;
+
+/// Options for one `session.run` of `tokens` padded tokens. A batch over `budget` (one row longer
+/// than the engine's batch budget) gives the CUDA arena back when the run ends: the arena otherwise
+/// keeps the size of its largest run for the session's life, and a 24 GB GPU under WSL or Windows
+/// then spills every later request into system memory (docs/families/nimble.md, v3).
+pub fn run_options(
+    device: Device,
+    tokens: usize,
+    budget: usize,
+) -> Result<ort::session::RunOptions, Error> {
+    let mut options = ort::session::RunOptions::new()?;
+    if let Device::Cuda(id) = device
+        && tokens > budget
+    {
+        options.set("memory.enable_memory_arena_shrinkage", format!("gpu:{id}"))?;
+    }
+    Ok(options)
+}
 
 /// Split `lens` (row lengths, in order) into consecutive batches whose padded size
 /// (rows × longest row) stays within `budget`, and at most `max_rows` rows each.
@@ -101,6 +124,12 @@ pub const LAYOUTS: &[&str] = &[
     "decima-late-interaction-v1",
     "decima-late-interaction-v2",
     "arbiter-fixed-v1",
+    "strands-pointer-v1",
+    "strands-pointer-v2",
+    "pplx-joint-v1",
+    "d1-omni-markers-v1",
+    "d3-code-readout-v1",
+    "gliclass-kv-v1",
 ];
 
 /// The layout a `decision` layer declares.
@@ -163,6 +192,18 @@ pub fn load(
             crate::decima::DecimaModel::load_files(files, device, threads)?,
         )),
         "arbiter-fixed-v1" => Ok(Box::new(crate::arbiter::ArbiterModel::load_files(
+            files, device, threads,
+        )?)),
+        "strands-pointer-v1" | "strands-pointer-v2" => Ok(Box::new(
+            crate::strands::StrandsModel::load_files(files, device, threads)?,
+        )),
+        "pplx-joint-v1" | "d3-code-readout-v1" => Ok(Box::new(crate::pplx::PplxModel::load_files(
+            files, device, threads,
+        )?)),
+        "d1-omni-markers-v1" => Ok(Box::new(crate::d1_omni::D1OmniModel::load_files(
+            files, device, threads,
+        )?)),
+        "gliclass-kv-v1" => Ok(Box::new(crate::gliclass_kv::GliclassKvModel::load_files(
             files, device, threads,
         )?)),
         other => Err(Error::Model(format!(

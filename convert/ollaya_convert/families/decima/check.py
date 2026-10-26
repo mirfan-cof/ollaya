@@ -10,7 +10,8 @@ flag (upstream's 422 STATE_TRUNCATED), and rejections must match. Requests Ollay
 first are counted on their own.
 
 The shared set is `llm_common.cases` (the edge cases and typed-decisions rows); `extra_cases` adds the inputs
-Decima's mapping treats specially, and `fit_cases` the questions too long for the option window (render.py).
+Decima's mapping treats specially and `long_cases` (states that fill decima-agent's 8,192-token window, and one over
+it), and `fit_cases` the questions too long for the option window (render.py).
 """
 from __future__ import annotations
 
@@ -87,7 +88,48 @@ def extra_cases():
         ("decima/255_choices", "hi", wire({"q": {"type": "choice", "instructions": "x",
                                                  "criteria": ["c%d" % i for i in range(255)]}})),
         ("decima/empty_instructions_state", "", wire({"q": {"type": "noul", "instructions": ""}})),
+    ] + ordinal_cases() + long_cases()
+
+
+def ordinal_cases():
+    """Choices read by the ordinal head (systemone's "ordinal": true): decima-guard's guard-web preset, labels with
+    descriptions, the limit of 10 labels, and the flag off."""
+    web = json.load(open(os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "crates", "ollaya-api", "src",
+                                      "presets", "decima-guard-web.json"), encoding="utf-8"))
+    severity = {"type": "choice", "ordinal": True, "instructions": "How severe is the incident?",
+                "criteria": {"none": "", "low": "a cosmetic issue", "high": "customers are blocked",
+                             "critical": {"data_loss": True, "outage": "full"}}}
+    return [
+        ("decima/ordinal/web_sqli", "GET /search?q=' OR 1=1 -- HTTP/1.1\nHost: shop.example", wire(web)),
+        ("decima/ordinal/web_benign", "GET /products?page=2&sort=price HTTP/1.1", wire(web)),
+        ("decima/ordinal/web_traversal", wire({"method": "GET", "path": "/static/../../etc/passwd"}), wire(web)),
+        ("decima/ordinal/severity", "Checkout fails for every customer since the 14:00 deploy.",
+         wire({"severity": severity, "plain": {**severity, "ordinal": False}})),
+        ("decima/ordinal/ten_labels", "a mild complaint",
+         wire({"q": {"type": "choice", "ordinal": True, "instructions": "Level?", "criteria": [str(i) for i in range(10)]}})),
+        ("decima/ordinal/eleven_labels", "a mild complaint",
+         wire({"q": {"type": "choice", "ordinal": True, "instructions": "Level?", "criteria": [str(i) for i in range(11)]}})),
     ]
+
+
+def agent_log(steps):
+    """A coding agent's transcript of `steps` test runs, about 95 mmBERT tokens each."""
+    return "".join("[step %d] $ cargo test -p billing --release\n   Compiling billing v0.4.%d (/work/billing)\n"
+                   "running 48 tests\ntest refund::partial_refund_keeps_the_order_open ... ok\n"
+                   "test refund::refund_over_total_is_rejected ... %s\nassistant: The refund check compares with >= "
+                   "now; I will read billing/refund.py again before I edit it.\n"
+                   % (i, i % 10, "FAILED" if i % 3 else "ok") for i in range(steps))
+
+
+def long_cases():
+    """States for decima-agent's 8,192-token window: state rows (question included) of about 3k, 6k and 8.1k
+    mmBERT tokens, which agent keeps whole, and 8.3k, which upstream answers with STATE_TRUNCATED. Every other tag
+    truncates all four (512 or 2,048 tokens)."""
+    qs = wire({"passed": {"type": "noul", "instructions": "Did every test in the last run pass?"},
+               "next": {"type": "choice", "instructions": "What should the agent do next?",
+                        "criteria": {"edit": "change the code", "rerun": "run the tests again", "ask": None}}})
+    return [("decima/long_%s" % name, agent_log(steps), qs)
+            for name, steps in (("3k", 32), ("6k", 63), ("8100", 85), ("8300_truncated", 87))]
 
 
 # A question long enough to push every option out of the 64-token option window on its own.

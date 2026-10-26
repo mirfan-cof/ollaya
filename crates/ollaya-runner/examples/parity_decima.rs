@@ -2,7 +2,7 @@
 //! `ollaya_convert.families.decima.goldens` (the author's `decima/model.py` and `systemone.py`,
 //! fp32).
 //!
-//!     cargo run --release -p ollaya-runner --example parity_decima -- <model-dir> <goldens.jsonl> [cpu|cuda] [--latency]
+//!     cargo run --release -p ollaya-runner --example parity_decima -- <model-dir> <goldens.jsonl> [cpu|cuda] [--latency] [--smoke]
 //!
 //! Every case is checked for its inputs first:
 //! * a request upstream rejects for an invalid question must be rejected, and each of its
@@ -20,7 +20,6 @@
 //! `--latency` then times every accepted request again (p50, p95, and the five-question requests).
 
 use std::collections::HashMap;
-use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -30,6 +29,8 @@ use ollaya_runner::Device;
 use ollaya_runner::decima::DecimaModel;
 use ollaya_runner::engine::Engine;
 use serde_json::Value;
+
+mod smoke;
 
 /// Largest difference accepted on the graph's outputs (ONNX Runtime vs PyTorch, both fp32).
 const SCORE_TOL: f64 = 1e-3;
@@ -98,9 +99,9 @@ fn answer_diff(ours: &Value, theirs: &Value) -> (f64, bool) {
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let (args, smoke) = smoke::args();
     if args.len() < 3 {
-        bail!("usage: parity_decima <model-dir> <goldens.jsonl> [cpu|cuda] [--latency]");
+        bail!("usage: parity_decima <model-dir> <goldens.jsonl> [cpu|cuda] [--latency] [--smoke]");
     }
     let device = match args.get(3).map(String::as_str) {
         Some("cuda") => Device::Cuda(0),
@@ -111,10 +112,9 @@ fn main() -> Result<()> {
     let model = DecimaModel::load(&PathBuf::from(&args[1]), device, None)?;
     println!("load {:.1}s on {device:?}", t.elapsed().as_secs_f64());
 
-    let file = std::fs::File::open(&args[2]).with_context(|| args[2].clone())?;
     let mut records = Vec::new();
-    for line in std::io::BufReader::new(file).lines() {
-        records.push(serde_json::from_str::<Value>(&line?)?);
+    for line in smoke::lines(&args[2], smoke)? {
+        records.push(serde_json::from_str::<Value>(&line)?);
     }
     let by_id: HashMap<&str, &Value> = records
         .iter()
@@ -260,6 +260,20 @@ fn main() -> Result<()> {
         prob_diffs.last().copied().unwrap_or(0.0),
         percentile(&prob_diffs, 99),
         1000.0 * forward / cases.len().max(1) as f64,
+    );
+    // One JSON line for `ollaya_convert.parity_run`, which records it in results/runs/.
+    println!(
+        "record: {}",
+        serde_json::json!({
+            "questions": nq,
+            "decisions_same": nq - disagree,
+            "max_logit_diff": score_max,
+            "max_ordinal_diff": proj_max,
+            "max_prob_diff": prob_diffs.last().copied().unwrap_or(0.0),
+            "p99_prob_diff": percentile(&prob_diffs, 99),
+            "max_answer_diff": wire_max,
+            "answers_other_choice": wire_choice,
+        })
     );
     if score_max.max(proj_max) > SCORE_TOL || prob_diffs.last().is_some_and(|d| d.is_nan()) {
         bail!("scores differ by more than {SCORE_TOL:e}");

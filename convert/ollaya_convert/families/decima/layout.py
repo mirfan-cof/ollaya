@@ -1,5 +1,5 @@
 """`decima-late-interaction-v1` and `-v2`: the request handling of the author's `decima/systemone.py`, `decima/model.py`
-and `decima/render.py` (github.com/amyrmahdy/decima at v2.2.0), written the way the Rust port is (HF `tokenizers` and
+and `decima/render.py` (github.com/amyrmahdy/decima at v2.3.0), written the way the Rust port is (HF `tokenizers` and
 `decision.json` only). `check.py` and `goldens.py` compare it id for id with upstream.
 
 Per question, in request order:
@@ -74,6 +74,9 @@ class DecimaLayout:
                 crit = {str(c): None for c in dict.fromkeys(crit)}
             if not isinstance(crit, dict) or not (lim["choices"][0] <= len(crit) <= lim["choices"][1]):
                 raise LayoutError("question %r: choice needs %d-%d criteria" % (qid, *lim["choices"]))
+            # decima bc02983: the ordinal head was trained on at most 10 levels.
+            if q.get("ordinal") is True and not (lim["levels"][0] <= len(crit) <= lim["levels"][1]):
+                raise LayoutError("question %r: an ordinal choice takes %d-%d labels" % (qid, *lim["levels"]))
             return t, body, [("%s: %s" % (k, text(v))) if text(v).strip() else str(k) for k, v in crit.items()]
         if t == "score":
             if not isinstance(crit, list) or not (lim["levels"][0] <= len(crit) <= lim["levels"][1]):
@@ -110,7 +113,7 @@ class DecimaLayout:
                 return full
         out = []
         for o, f in zip(options, full):
-            if len(f) <= max_len - 2 or self.tokens(f) <= max_len:
+            if self.tokens(f) <= max_len:
                 out.append(f)
                 continue
             opt = normalize(o)

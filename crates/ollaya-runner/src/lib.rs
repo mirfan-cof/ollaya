@@ -6,12 +6,14 @@
 pub mod arbiter;
 pub mod clef;
 pub mod clm;
+pub mod d1_omni;
 pub mod decider;
 pub mod decider_vision;
 pub mod decima;
 pub mod decision;
 pub mod engine;
 pub mod gliclass;
+pub mod gliclass_kv;
 pub mod jeeves;
 pub mod kev;
 pub mod llama;
@@ -21,8 +23,10 @@ pub mod net;
 pub mod nimble;
 pub mod nli;
 pub mod onnx;
+pub mod pplx;
 pub mod qwen3guard;
 pub mod server;
+pub mod strands;
 pub mod vision;
 pub mod von;
 

@@ -94,6 +94,31 @@ if (tailwind.status !== 0) {
   throw new Error('tailwindcss failed')
 }
 
+// 2b. The /try demo runs ../web/ollaya.js in the browser. Its page script and the runtime bundle (web/ollaya.js
+// with onnxruntime-web's WebAssembly build) go to dist/static with the .wasm and .mjs files they load, so no CDN is
+// needed. web/pkg is built from Rust (sh ../web/build.sh) and CI does not build it: without it /try is left out.
+const web = join(root, '..', 'web')
+const ortDist = join(web, 'node_modules', 'onnxruntime-web', 'dist')
+const ortFiles = ['ort-wasm-simd-threaded.wasm', 'ort-wasm-simd-threaded.mjs']
+if ((await stat(join(web, 'pkg', 'ollaya_web_bg.wasm')).catch(() => null)) && (await stat(ortDist).catch(() => null))) {
+  const browser = { bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, logLevel: 'warning' }
+  await build({ ...browser, entryPoints: [join(root, 'src', 'client', 'try.js')], outfile: join(dist, 'static', 'try.js') })
+  await build({
+    ...browser,
+    entryPoints: [join(web, 'ollaya.js')],
+    outfile: join(dist, 'static', 'ollaya-wasm.js'),
+    alias: { 'onnxruntime-web': 'onnxruntime-web/wasm' },
+    // An alias resolves from the working directory: onnxruntime-web is web/'s dependency, and this condition picks
+    // the build that loads its .mjs and .wasm from env.wasm.wasmPaths rather than inlining them.
+    nodePaths: [join(web, 'node_modules')],
+    conditions: ['onnxruntime-web-use-extern-wasm'],
+  })
+  await cp(join(web, 'pkg', 'ollaya_web_bg.wasm'), join(dist, 'static', 'ollaya_web_bg.wasm'))
+  for (const f of ortFiles) await cp(join(ortDist, f), join(dist, 'static', f))
+} else {
+  console.warn('build: ../web/pkg is not built (sh ../web/build.sh, then npm ci in ../web); /try is left out')
+}
+
 // 3. Content hashes of static files.
 const staticDir = join(dist, 'static')
 const assetVersions = {}
@@ -115,7 +140,18 @@ await build({
   jsxImportSource: 'hono/jsx',
   logLevel: 'warning',
 })
-const { renderSite } = await import(`${pathToFileURL(bundle).href}?t=${Date.now()}`)
+const { renderSite, withReadmeBlocks } = await import(`${pathToFileURL(bundle).href}?t=${Date.now()}`)
+// The README's measured numbers come from results/ (src/data/readme.ts): README=write rewrites them, otherwise a stale
+// block fails the build.
+const readmePath = join(root, '..', 'README.md')
+const readme = await readFile(readmePath, 'utf8')
+// GitHub shows the README, so its links go to the production site whatever SITE_ORIGIN this build uses.
+const readmeNow = withReadmeBlocks(readme, DEFAULT_ORIGIN)
+if (readmeNow !== readme) {
+  if (process.env.README !== 'write') throw new Error('README.md: its results blocks are stale; run `npm run readme` in site/')
+  await writeFile(readmePath, readmeNow)
+  console.log('README.md: results blocks rewritten')
+}
 const bench = resolveOrigin(process.env.BENCH_ORIGIN?.trim() || DEFAULT_BENCH_ORIGIN)
 const files = await renderSite({ origin, bench, assetVersions, stars: await githubStars() })
 

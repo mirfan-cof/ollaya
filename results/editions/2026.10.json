@@ -9,7 +9,35 @@
   "2026-10-14-latency-rtx5090-cuda.json",
   "2026-10-14-latency-rtx5090-cpu.json",
   "2026-10-14-public-benchmark-rtx5090-cuda.json",
-  "2026-10-14-typed-decisions-rtx5090-cuda.json"
+  "2026-10-14-typed-decisions-rtx5090-cuda.json",
+  "2026-10-19-latency-rtx5090-cuda.json",
+  "2026-10-19-latency-rtx5090-cpu.json",
+  "2026-10-19-public-benchmark-rtx5090-cuda.json",
+  "2026-10-19-typed-decisions-rtx5090-cuda.json",
+  "2026-10-20-latency-rtx5090-cuda.json",
+  "2026-10-20-latency-rtx5090-cpu.json",
+  "2026-10-20-public-benchmark-rtx5090-cuda.json",
+  "2026-10-20-typed-decisions-rtx5090-cuda.json",
+  "2026-10-23-latency-rtx5090-cuda.json",
+  "2026-10-23-latency-rtx5090-cpu.json",
+  "2026-10-23-public-benchmark-rtx5090-cuda.json",
+  "2026-10-23-typed-decisions-rtx5090-cuda.json",
+  "2026-10-24-latency-rtx5090-cuda.json",
+  "2026-10-24-latency-rtx5090-cpu.json",
+  "2026-10-24-public-benchmark-rtx5090-cuda.json",
+  "2026-10-24-typed-decisions-rtx5090-cuda.json",
+  "2026-10-24-latency-rtx5090-cuda-d3.json",
+  "2026-10-24-latency-rtx5090-cpu-d3.json",
+  "2026-10-24-public-benchmark-rtx5090-cuda-d3.json",
+  "2026-10-24-typed-decisions-rtx5090-cuda-d3.json",
+  "2026-10-24-latency-rtx5090-cuda-cob560.json",
+  "2026-10-24-latency-rtx5090-cpu-cob560.json",
+  "2026-10-24-public-benchmark-rtx5090-cuda-cob560.json",
+  "2026-10-24-typed-decisions-rtx5090-cuda-cob560.json",
+  "2026-10-24-latency-rtx5090-cuda-cob562.json",
+  "2026-10-24-latency-rtx5090-cpu-cob562.json",
+  "2026-10-24-public-benchmark-rtx5090-cuda-cob562.json",
+  "2026-10-24-typed-decisions-rtx5090-cuda-cob562.json"
  ],
  "models": [
   "decima:small",
@@ -47,37 +75,168 @@
   "clef:flash",
   "jeeves:9b",
   "nimble:9b",
-  "jeb:27b"
+  "jeb:27b",
+  "nimble:9b-v3",
+  "pplx-decider:flash",
+  "strands-decider:2b",
+  "decima:guard",
+  "decima:guard-small",
+  "largha:150m",
+  "coba:1b",
+  "coba:400m",
+  "coba:400m-ternary",
+  "coba:150m-ternary",
+  "coba:68m-ternary",
+  "sura:0.8b",
+  "sura:2b",
+  "d3:edge",
+  "d3:lite",
+  "d3:nano",
+  "d3:mini",
+  "d3:flash",
+  "gliclass:v4-edge",
+  "decima:base-clean",
+  "winnow:e2b"
  ],
  "score": {
   "definition": "Mean over 14 tasks (13 public subsets and typed-decisions, equal weight) of the chance-corrected accuracy 100 * (accuracy - chance) / (1 - chance); chance is the mean of 1/K over the task's questions. A model trained on a task's train split is scored on the other tasks",
   "interval": "95 % bootstrap, 1000 draws, seed 20261014; questions resampled within each subset, typed-decisions states whole",
   "results": [
    {
-    "model": "jeb:27b",
-    "score": 67.85,
+    "model": "pplx-decider:flash",
+    "score": 73.65,
     "score_ci": [
-     65.76,
+     71.96,
+     75.21
+    ],
+    "tasks": {
+     "vitaminc-dev": 86.23,
+     "massive-en-US": 90.92,
+     "massive-de-DE": 91.23,
+     "boolq": 76.0,
+     "squad2": 85.28,
+     "paws": 87.2,
+     "multinli": 87.96,
+     "civil_comments": 85.33,
+     "aegis2": 68.8,
+     "helpsteer2": 23.19,
+     "summeval-relevance": 42.71,
+     "summeval-consistency": 80.03,
+     "pubmedqa": 66.4,
+     "typed-decisions": 59.85
+    },
+    "trained_on": []
+   },
+   {
+    "model": "jeb:27b",
+    "score": 69.1,
+    "score_ci": [
+     66.64,
+     71.44
+    ],
+    "tasks": {
+     "vitaminc-dev": 70.45,
+     "massive-en-US": 85.78,
+     "massive-de-DE": 87.29,
+     "boolq": 79.33,
+     "squad2": 73.24,
+     "paws": 65.6,
+     "multinli": 80.43,
+     "civil_comments": 81.33,
+     "aegis2": 62.4,
+     "helpsteer2": 26.2,
+     "summeval-relevance": 40.1,
+     "summeval-consistency": 79.17,
+     "pubmedqa": 71.2,
+     "typed-decisions": 70.99
+    },
+    "trained_on": [
+     "typed-decisions",
+     "civil_comments",
+     "helpsteer2",
+     "massive-en-US",
+     "massive-de-DE"
+    ]
+   },
+   {
+    "model": "d3:mini",
+    "score": 68.0,
+    "score_ci": [
+     66.09,
      69.85
     ],
     "tasks": {
-     "vitaminc-dev": 72.2,
-     "massive-en-US": 86.99,
+     "vitaminc-dev": 73.96,
+     "massive-en-US": 87.9,
      "massive-de-DE": 86.08,
      "boolq": 78.0,
-     "squad2": 52.51,
-     "paws": 65.6,
+     "squad2": 48.49,
+     "paws": 78.4,
      "multinli": 87.46,
-     "civil_comments": 70.0,
-     "aegis2": 57.6,
+     "civil_comments": 86.67,
+     "aegis2": 60.8,
+     "helpsteer2": 26.71,
+     "summeval-relevance": 39.58,
+     "summeval-consistency": 79.17,
+     "pubmedqa": 57.4,
+     "typed-decisions": 61.39
+    },
+    "trained_on": []
+   },
+   {
+    "model": "d3:flash",
+    "score": 67.8,
+    "score_ci": [
+     65.97,
+     69.55
+    ],
+    "tasks": {
+     "vitaminc-dev": 74.71,
+     "massive-en-US": 88.81,
+     "massive-de-DE": 88.2,
+     "boolq": 79.33,
+     "squad2": 44.48,
+     "paws": 76.8,
+     "multinli": 89.97,
+     "civil_comments": 85.33,
+     "aegis2": 59.2,
      "helpsteer2": 32.23,
-     "summeval-relevance": 45.83,
-     "summeval-consistency": 83.51,
+     "summeval-relevance": 32.29,
+     "summeval-consistency": 80.9,
+     "pubmedqa": 59.2,
+     "typed-decisions": 57.8
+    },
+    "trained_on": []
+   },
+   {
+    "model": "jeb:9b",
+    "score": 66.01,
+    "score_ci": [
+     63.36,
+     68.58
+    ],
+    "tasks": {
+     "vitaminc-dev": 63.69,
+     "massive-en-US": 86.39,
+     "massive-de-DE": 85.48,
+     "boolq": 74.0,
+     "squad2": 71.24,
+     "paws": 70.4,
+     "multinli": 74.92,
+     "civil_comments": 76.67,
+     "aegis2": 57.6,
+     "helpsteer2": 19.68,
+     "summeval-relevance": 36.46,
+     "summeval-consistency": 81.77,
      "pubmedqa": 64.0,
-     "typed-decisions": 71.06
+     "typed-decisions": 69.96
     },
     "trained_on": [
-     "typed-decisions"
+     "typed-decisions",
+     "civil_comments",
+     "helpsteer2",
+     "massive-en-US",
+     "massive-de-DE"
     ]
    },
    {
@@ -129,33 +288,6 @@
      "typed-decisions": 56.48
     },
     "trained_on": []
-   },
-   {
-    "model": "jeb:9b",
-    "score": 64.9,
-    "score_ci": [
-     62.62,
-     66.98
-    ],
-    "tasks": {
-     "vitaminc-dev": 63.19,
-     "massive-en-US": 84.27,
-     "massive-de-DE": 83.66,
-     "boolq": 71.33,
-     "squad2": 59.87,
-     "paws": 65.6,
-     "multinli": 76.92,
-     "civil_comments": 72.0,
-     "aegis2": 56.8,
-     "helpsteer2": 29.22,
-     "summeval-relevance": 36.98,
-     "summeval-consistency": 85.24,
-     "pubmedqa": 58.6,
-     "typed-decisions": 68.72
-    },
-    "trained_on": [
-     "typed-decisions"
-    ]
    },
    {
     "model": "cygnet:12b",
@@ -285,6 +417,56 @@
     "trained_on": []
    },
    {
+    "model": "nimble:9b-v3",
+    "score": 62.43,
+    "score_ci": [
+     60.47,
+     64.39
+    ],
+    "tasks": {
+     "vitaminc-dev": 69.2,
+     "massive-en-US": 85.48,
+     "massive-de-DE": 83.06,
+     "boolq": 72.0,
+     "squad2": 62.54,
+     "paws": 63.2,
+     "multinli": 83.44,
+     "civil_comments": 78.0,
+     "aegis2": 48.0,
+     "helpsteer2": 26.2,
+     "summeval-relevance": 21.88,
+     "summeval-consistency": 70.49,
+     "pubmedqa": 62.2,
+     "typed-decisions": 48.35
+    },
+    "trained_on": []
+   },
+   {
+    "model": "d3:nano",
+    "score": 62.24,
+    "score_ci": [
+     60.27,
+     64.25
+    ],
+    "tasks": {
+     "vitaminc-dev": 70.7,
+     "massive-en-US": 83.36,
+     "massive-de-DE": 81.24,
+     "boolq": 75.33,
+     "squad2": 47.83,
+     "paws": 70.4,
+     "multinli": 82.94,
+     "civil_comments": 86.0,
+     "aegis2": 40.8,
+     "helpsteer2": 29.22,
+     "summeval-relevance": 34.9,
+     "summeval-consistency": 72.22,
+     "pubmedqa": 51.4,
+     "typed-decisions": 44.98
+    },
+    "trained_on": []
+   },
+   {
     "model": "nimble:9b",
     "score": 61.86,
     "score_ci": [
@@ -310,6 +492,31 @@
     "trained_on": []
    },
    {
+    "model": "strands-decider:2b",
+    "score": 61.27,
+    "score_ci": [
+     59.25,
+     63.12
+    ],
+    "tasks": {
+     "vitaminc-dev": 64.19,
+     "massive-en-US": 82.15,
+     "massive-de-DE": 77.61,
+     "boolq": 72.67,
+     "squad2": 65.89,
+     "paws": 70.4,
+     "multinli": 76.92,
+     "civil_comments": 81.33,
+     "aegis2": 43.2,
+     "helpsteer2": 23.19,
+     "summeval-relevance": 19.79,
+     "summeval-consistency": 73.96,
+     "pubmedqa": 62.8,
+     "typed-decisions": 43.66
+    },
+    "trained_on": []
+   },
+   {
     "model": "kev:4b",
     "score": 61.21,
     "score_ci": [
@@ -331,31 +538,6 @@
      "summeval-consistency": 76.56,
      "pubmedqa": 57.4,
      "typed-decisions": 51.5
-    },
-    "trained_on": []
-   },
-   {
-    "model": "jeeves:9b",
-    "score": 61.11,
-    "score_ci": [
-     59.09,
-     62.96
-    ],
-    "tasks": {
-     "vitaminc-dev": 44.91,
-     "massive-en-US": 85.78,
-     "massive-de-DE": 84.27,
-     "boolq": 74.0,
-     "squad2": 65.89,
-     "paws": 64.0,
-     "multinli": 87.96,
-     "civil_comments": 58.0,
-     "aegis2": 54.4,
-     "helpsteer2": 20.18,
-     "summeval-relevance": 25.52,
-     "summeval-consistency": 80.03,
-     "pubmedqa": 57.4,
-     "typed-decisions": 53.19
     },
     "trained_on": []
    },
@@ -435,6 +617,31 @@
     "trained_on": []
    },
    {
+    "model": "gliclass:v4-edge",
+    "score": 55.83,
+    "score_ci": [
+     53.64,
+     57.71
+    ],
+    "tasks": {
+     "vitaminc-dev": 65.44,
+     "massive-en-US": 84.27,
+     "massive-de-DE": 78.22,
+     "boolq": 57.33,
+     "squad2": 56.52,
+     "paws": 56.0,
+     "multinli": 74.92,
+     "civil_comments": 79.33,
+     "aegis2": 64.8,
+     "helpsteer2": 19.68,
+     "summeval-relevance": -4.69,
+     "summeval-consistency": 73.09,
+     "pubmedqa": 49.0,
+     "typed-decisions": 27.69
+    },
+    "trained_on": []
+   },
+   {
     "model": "snap:2b",
     "score": 55.75,
     "score_ci": [
@@ -510,6 +717,90 @@
     "trained_on": []
    },
    {
+    "model": "jeeves:9b",
+    "score": 54.02,
+    "score_ci": [
+     50.66,
+     57.1
+    ],
+    "tasks": {
+     "vitaminc-dev": 61.94,
+     "massive-en-US": 87.6,
+     "massive-de-DE": 85.48,
+     "boolq": 76.0,
+     "squad2": 55.18,
+     "paws": 68.0,
+     "multinli": 84.95,
+     "civil_comments": 73.33,
+     "aegis2": 52.0,
+     "helpsteer2": 28.21,
+     "summeval-relevance": 12.5,
+     "summeval-consistency": 80.9,
+     "pubmedqa": 61.6,
+     "typed-decisions": 69.23
+    },
+    "trained_on": [
+     "typed-decisions",
+     "boolq",
+     "multinli",
+     "paws",
+     "civil_comments",
+     "helpsteer2",
+     "massive-en-US",
+     "massive-de-DE"
+    ]
+   },
+   {
+    "model": "d3:lite",
+    "score": 49.87,
+    "score_ci": [
+     47.87,
+     51.76
+    ],
+    "tasks": {
+     "vitaminc-dev": 66.94,
+     "massive-en-US": 83.66,
+     "massive-de-DE": 80.64,
+     "boolq": 62.67,
+     "squad2": 45.82,
+     "paws": 68.8,
+     "multinli": 81.94,
+     "civil_comments": 78.67,
+     "aegis2": 18.4,
+     "helpsteer2": 15.16,
+     "summeval-relevance": 38.02,
+     "summeval-consistency": -13.72,
+     "pubmedqa": 40.6,
+     "typed-decisions": 30.62
+    },
+    "trained_on": []
+   },
+   {
+    "model": "winnow:e2b",
+    "score": 49.41,
+    "score_ci": [
+     47.28,
+     51.56
+    ],
+    "tasks": {
+     "vitaminc-dev": 38.65,
+     "massive-en-US": 77.92,
+     "massive-de-DE": 70.05,
+     "boolq": 52.0,
+     "squad2": 49.83,
+     "paws": 60.0,
+     "multinli": 57.86,
+     "civil_comments": 71.33,
+     "aegis2": 63.2,
+     "helpsteer2": 16.67,
+     "summeval-relevance": 26.56,
+     "summeval-consistency": 46.18,
+     "pubmedqa": 17.8,
+     "typed-decisions": 43.74
+    },
+    "trained_on": []
+   },
+   {
     "model": "jevk5:4b",
     "score": 48.6,
     "score_ci": [
@@ -556,6 +847,56 @@
      "summeval-consistency": 80.03,
      "pubmedqa": 43.6,
      "typed-decisions": 27.55
+    },
+    "trained_on": []
+   },
+   {
+    "model": "d3:edge",
+    "score": 42.93,
+    "score_ci": [
+     40.74,
+     44.98
+    ],
+    "tasks": {
+     "vitaminc-dev": 60.68,
+     "massive-en-US": 78.22,
+     "massive-de-DE": 60.67,
+     "boolq": 45.33,
+     "squad2": 27.76,
+     "paws": 65.6,
+     "multinli": 68.39,
+     "civil_comments": 75.33,
+     "aegis2": 10.4,
+     "helpsteer2": 15.66,
+     "summeval-relevance": 29.69,
+     "summeval-consistency": 25.35,
+     "pubmedqa": 22.6,
+     "typed-decisions": 15.38
+    },
+    "trained_on": []
+   },
+   {
+    "model": "sura:2b",
+    "score": 40.9,
+    "score_ci": [
+     38.54,
+     43.04
+    ],
+    "tasks": {
+     "vitaminc-dev": 57.68,
+     "massive-en-US": 76.4,
+     "massive-de-DE": 64.61,
+     "boolq": 41.33,
+     "squad2": 35.12,
+     "paws": 39.2,
+     "multinli": 55.85,
+     "civil_comments": 66.0,
+     "aegis2": 7.2,
+     "helpsteer2": 20.18,
+     "summeval-relevance": -6.25,
+     "summeval-consistency": 41.84,
+     "pubmedqa": 36.4,
+     "typed-decisions": 37.0
     },
     "trained_on": []
    },
@@ -637,6 +978,31 @@
     "trained_on": []
    },
    {
+    "model": "sura:0.8b",
+    "score": 37.21,
+    "score_ci": [
+     34.9,
+     39.47
+    ],
+    "tasks": {
+     "vitaminc-dev": 58.18,
+     "massive-en-US": 73.68,
+     "massive-de-DE": 59.46,
+     "boolq": 39.33,
+     "squad2": 21.74,
+     "paws": 32.8,
+     "multinli": 44.82,
+     "civil_comments": 69.33,
+     "aegis2": 4.0,
+     "helpsteer2": 13.15,
+     "summeval-relevance": -7.29,
+     "summeval-consistency": 54.86,
+     "pubmedqa": 21.4,
+     "typed-decisions": 35.53
+    },
+    "trained_on": []
+   },
+   {
     "model": "laya:multilingual",
     "score": 36.74,
     "score_ci": [
@@ -658,6 +1024,56 @@
      "summeval-consistency": 12.33,
      "pubmedqa": 28.0,
      "typed-decisions": 4.62
+    },
+    "trained_on": []
+   },
+   {
+    "model": "coba:1b",
+    "score": 36.33,
+    "score_ci": [
+     34.25,
+     38.64
+    ],
+    "tasks": {
+     "vitaminc-dev": 62.69,
+     "massive-en-US": 76.1,
+     "massive-de-DE": 48.27,
+     "boolq": 51.33,
+     "squad2": 33.78,
+     "paws": 20.0,
+     "multinli": 61.37,
+     "civil_comments": 76.67,
+     "aegis2": 19.2,
+     "helpsteer2": -6.93,
+     "summeval-relevance": -16.15,
+     "summeval-consistency": -3.3,
+     "pubmedqa": 43.0,
+     "typed-decisions": 42.56
+    },
+    "trained_on": []
+   },
+   {
+    "model": "coba:400m",
+    "score": 35.83,
+    "score_ci": [
+     33.71,
+     37.93
+    ],
+    "tasks": {
+     "vitaminc-dev": 58.68,
+     "massive-en-US": 78.82,
+     "massive-de-DE": 54.02,
+     "boolq": 49.33,
+     "squad2": 37.12,
+     "paws": 24.8,
+     "multinli": 64.38,
+     "civil_comments": 76.67,
+     "aegis2": 8.8,
+     "helpsteer2": -7.93,
+     "summeval-relevance": -14.06,
+     "summeval-consistency": -8.51,
+     "pubmedqa": 39.4,
+     "typed-decisions": 40.07
     },
     "trained_on": []
    },
@@ -741,23 +1157,48 @@
     "score": 27.87,
     "score_ci": [
      25.69,
-     29.87
+     30.14
     ],
     "tasks": {
-     "vitaminc-dev": 44.66,
-     "massive-en-US": 82.76,
-     "massive-de-DE": 79.43,
-     "boolq": 20.0,
-     "squad2": 14.38,
-     "paws": 2.4,
-     "multinli": 66.89,
-     "civil_comments": 53.33,
-     "aegis2": 16.8,
-     "helpsteer2": -3.92,
-     "summeval-relevance": 6.77,
-     "summeval-consistency": -18.92,
-     "pubmedqa": 4.6,
-     "typed-decisions": 20.95
+     "vitaminc-dev": 47.66,
+     "massive-en-US": 80.94,
+     "massive-de-DE": 77.92,
+     "boolq": 19.33,
+     "squad2": 7.69,
+     "paws": 4.8,
+     "multinli": 68.9,
+     "civil_comments": 40.0,
+     "aegis2": 15.2,
+     "helpsteer2": -3.41,
+     "summeval-relevance": 17.71,
+     "summeval-consistency": -16.32,
+     "pubmedqa": 5.8,
+     "typed-decisions": 23.96
+    },
+    "trained_on": []
+   },
+   {
+    "model": "decima:guard",
+    "score": 25.77,
+    "score_ci": [
+     23.67,
+     28.07
+    ],
+    "tasks": {
+     "vitaminc-dev": 37.65,
+     "massive-en-US": 54.32,
+     "massive-de-DE": 46.15,
+     "boolq": -4.67,
+     "squad2": -2.34,
+     "paws": -2.4,
+     "multinli": 69.9,
+     "civil_comments": 40.67,
+     "aegis2": 49.6,
+     "helpsteer2": -11.95,
+     "summeval-relevance": -9.38,
+     "summeval-consistency": 67.01,
+     "pubmedqa": 13.6,
+     "typed-decisions": 12.67
     },
     "trained_on": []
    },
@@ -783,6 +1224,31 @@
      "summeval-consistency": -14.58,
      "pubmedqa": 30.4,
      "typed-decisions": 18.9
+    },
+    "trained_on": []
+   },
+   {
+    "model": "decima:base-clean",
+    "score": 23.46,
+    "score_ci": [
+     21.34,
+     25.59
+    ],
+    "tasks": {
+     "vitaminc-dev": 39.4,
+     "massive-en-US": 64.91,
+     "massive-de-DE": 56.44,
+     "boolq": 31.33,
+     "squad2": -1.67,
+     "paws": 18.4,
+     "multinli": 71.91,
+     "civil_comments": 46.0,
+     "aegis2": 0.0,
+     "helpsteer2": -11.45,
+     "summeval-relevance": 3.65,
+     "summeval-consistency": -16.32,
+     "pubmedqa": 2.8,
+     "typed-decisions": 23.0
     },
     "trained_on": []
    },
@@ -912,6 +1378,31 @@
     "trained_on": []
    },
    {
+    "model": "decima:guard-small",
+    "score": 14.77,
+    "score_ci": [
+     12.34,
+     16.86
+    ],
+    "tasks": {
+     "vitaminc-dev": 24.87,
+     "massive-en-US": 30.72,
+     "massive-de-DE": 18.62,
+     "boolq": -11.33,
+     "squad2": -0.33,
+     "paws": -4.0,
+     "multinli": 49.83,
+     "civil_comments": 44.0,
+     "aegis2": 47.2,
+     "helpsteer2": -11.45,
+     "summeval-relevance": -0.52,
+     "summeval-consistency": 9.72,
+     "pubmedqa": -2.6,
+     "typed-decisions": 12.09
+    },
+    "trained_on": []
+   },
+   {
     "model": "clm:8b",
     "score": 9.28,
     "score_ci": [
@@ -935,6 +1426,144 @@
      "typed-decisions": 5.79
     },
     "trained_on": []
+   },
+   {
+    "model": "largha:150m",
+    "score": 9.05,
+    "score_ci": [
+     6.56,
+     11.55
+    ],
+    "tasks": {
+     "vitaminc-dev": 21.37,
+     "massive-en-US": 57.95,
+     "massive-de-DE": 44.64,
+     "boolq": 19.33,
+     "squad2": -6.35,
+     "paws": -3.2,
+     "multinli": 5.18,
+     "civil_comments": 8.67,
+     "aegis2": 14.4,
+     "helpsteer2": -10.44,
+     "summeval-relevance": -19.79,
+     "summeval-consistency": -10.24,
+     "pubmedqa": -3.8,
+     "typed-decisions": 82.34
+    },
+    "trained_on": [
+     "typed-decisions"
+    ]
+   },
+   {
+    "model": "coba:150m-ternary",
+    "score": 4.6,
+    "score_ci": [
+     1.69,
+     7.89
+    ],
+    "tasks": {
+     "vitaminc-dev": 74.21,
+     "massive-en-US": 87.29,
+     "massive-de-DE": 30.42,
+     "boolq": 46.0,
+     "squad2": 54.52,
+     "paws": 85.6,
+     "multinli": 73.91,
+     "civil_comments": 83.33,
+     "aegis2": 65.6,
+     "helpsteer2": -4.42,
+     "summeval-relevance": -15.62,
+     "summeval-consistency": -2.43,
+     "pubmedqa": 42.4,
+     "typed-decisions": 31.87
+    },
+    "trained_on": [
+     "vitaminc-dev",
+     "massive-en-US",
+     "massive-de-DE",
+     "boolq",
+     "squad2",
+     "paws",
+     "multinli",
+     "civil_comments",
+     "aegis2",
+     "helpsteer2",
+     "pubmedqa"
+    ]
+   },
+   {
+    "model": "coba:400m-ternary",
+    "score": 4.39,
+    "score_ci": [
+     1.35,
+     7.52
+    ],
+    "tasks": {
+     "vitaminc-dev": 84.22,
+     "massive-en-US": 89.41,
+     "massive-de-DE": 38.29,
+     "boolq": 62.0,
+     "squad2": 67.89,
+     "paws": 87.2,
+     "multinli": 85.45,
+     "civil_comments": 85.33,
+     "aegis2": 66.4,
+     "helpsteer2": -4.92,
+     "summeval-relevance": -14.58,
+     "summeval-consistency": -7.64,
+     "pubmedqa": 48.4,
+     "typed-decisions": 35.38
+    },
+    "trained_on": [
+     "vitaminc-dev",
+     "massive-en-US",
+     "massive-de-DE",
+     "boolq",
+     "squad2",
+     "paws",
+     "multinli",
+     "civil_comments",
+     "aegis2",
+     "helpsteer2",
+     "pubmedqa"
+    ]
+   },
+   {
+    "model": "coba:68m-ternary",
+    "score": 1.63,
+    "score_ci": [
+     -1.32,
+     4.86
+    ],
+    "tasks": {
+     "vitaminc-dev": 69.45,
+     "massive-en-US": 88.81,
+     "massive-de-DE": 27.09,
+     "boolq": 39.33,
+     "squad2": 43.81,
+     "paws": 78.4,
+     "multinli": 72.91,
+     "civil_comments": 85.33,
+     "aegis2": 53.6,
+     "helpsteer2": -4.42,
+     "summeval-relevance": -15.1,
+     "summeval-consistency": -4.17,
+     "pubmedqa": 41.2,
+     "typed-decisions": 24.18
+    },
+    "trained_on": [
+     "vitaminc-dev",
+     "massive-en-US",
+     "massive-de-DE",
+     "boolq",
+     "squad2",
+     "paws",
+     "multinli",
+     "civil_comments",
+     "aegis2",
+     "helpsteer2",
+     "pubmedqa"
+    ]
    }
   ]
  },
@@ -942,14 +1571,180 @@
   "laya:typed-decisions": [
    "typed-decisions"
   ],
+  "largha:150m": [
+   "typed-decisions"
+  ],
   "jeb:4b": [
    "typed-decisions"
   ],
   "jeb:9b": [
-   "typed-decisions"
+   "typed-decisions",
+   "civil_comments",
+   "helpsteer2",
+   "massive-en-US",
+   "massive-de-DE"
   ],
   "jeb:27b": [
-   "typed-decisions"
+   "typed-decisions",
+   "civil_comments",
+   "helpsteer2",
+   "massive-en-US",
+   "massive-de-DE"
+  ],
+  "coba:400m-ternary": [
+   "vitaminc-dev",
+   "massive-en-US",
+   "massive-de-DE",
+   "boolq",
+   "squad2",
+   "paws",
+   "multinli",
+   "civil_comments",
+   "aegis2",
+   "helpsteer2",
+   "pubmedqa"
+  ],
+  "coba:150m-ternary": [
+   "vitaminc-dev",
+   "massive-en-US",
+   "massive-de-DE",
+   "boolq",
+   "squad2",
+   "paws",
+   "multinli",
+   "civil_comments",
+   "aegis2",
+   "helpsteer2",
+   "pubmedqa"
+  ],
+  "coba:68m-ternary": [
+   "vitaminc-dev",
+   "massive-en-US",
+   "massive-de-DE",
+   "boolq",
+   "squad2",
+   "paws",
+   "multinli",
+   "civil_comments",
+   "aegis2",
+   "helpsteer2",
+   "pubmedqa"
+  ],
+  "jeeves:9b": [
+   "typed-decisions",
+   "boolq",
+   "multinli",
+   "paws",
+   "civil_comments",
+   "helpsteer2",
+   "massive-en-US",
+   "massive-de-DE"
   ]
- }
+ },
+ "updates": [
+  {
+   "release": "0.14.0",
+   "date": "2026-10-19",
+   "runs": [
+    "2026-10-19-latency-rtx5090-cuda.json",
+    "2026-10-19-latency-rtx5090-cpu.json",
+    "2026-10-19-public-benchmark-rtx5090-cuda.json",
+    "2026-10-19-typed-decisions-rtx5090-cuda.json"
+   ],
+   "models": [
+    "clef:flash",
+    "clef:flash-fp16",
+    "decider:0.8b",
+    "decider:2b",
+    "decider:4b",
+    "decision:eos",
+    "jeeves:9b",
+    "kev:0.8b",
+    "kev:0.8b-fp16",
+    "kev:4b",
+    "kev:4b-fp16",
+    "kev:9b",
+    "kev:9b-fp16",
+    "nimble:9b",
+    "nimble:9b-fp16",
+    "nimble:9b-v3",
+    "pplx-decider:flash",
+    "pplx-decider:flash-fp16",
+    "strands-decider:2b",
+    "strands-decider:2b-fp16"
+   ]
+  },
+  {
+   "release": "0.15.0",
+   "date": "2026-10-20",
+   "runs": [
+    "2026-10-20-latency-rtx5090-cuda.json",
+    "2026-10-20-latency-rtx5090-cpu.json",
+    "2026-10-20-public-benchmark-rtx5090-cuda.json",
+    "2026-10-20-typed-decisions-rtx5090-cuda.json"
+   ],
+   "models": [
+    "decima:agent",
+    "decima:base",
+    "decima:guard",
+    "decima:guard-small",
+    "decima:small",
+    "largha:150m"
+   ]
+  },
+  {
+   "release": "0.17.0",
+   "date": "2026-10-24",
+   "runs": [
+    "2026-10-23-latency-rtx5090-cuda.json",
+    "2026-10-23-latency-rtx5090-cpu.json",
+    "2026-10-23-public-benchmark-rtx5090-cuda.json",
+    "2026-10-23-typed-decisions-rtx5090-cuda.json",
+    "2026-10-24-latency-rtx5090-cuda.json",
+    "2026-10-24-latency-rtx5090-cpu.json",
+    "2026-10-24-public-benchmark-rtx5090-cuda.json",
+    "2026-10-24-typed-decisions-rtx5090-cuda.json"
+   ],
+   "models": [
+    "coba:1b",
+    "coba:400m",
+    "coba:400m-ternary",
+    "coba:150m-ternary",
+    "coba:68m-ternary",
+    "sura:0.8b",
+    "sura:2b"
+   ]
+  },
+  {
+   "release": "0.18.0",
+   "date": "2026-10-24",
+   "runs": [
+    "2026-10-24-latency-rtx5090-cuda-d3.json",
+    "2026-10-24-latency-rtx5090-cpu-d3.json",
+    "2026-10-24-public-benchmark-rtx5090-cuda-d3.json",
+    "2026-10-24-typed-decisions-rtx5090-cuda-d3.json",
+    "2026-10-24-latency-rtx5090-cuda-cob560.json",
+    "2026-10-24-latency-rtx5090-cpu-cob560.json",
+    "2026-10-24-public-benchmark-rtx5090-cuda-cob560.json",
+    "2026-10-24-typed-decisions-rtx5090-cuda-cob560.json",
+    "2026-10-24-latency-rtx5090-cuda-cob562.json",
+    "2026-10-24-latency-rtx5090-cpu-cob562.json",
+    "2026-10-24-public-benchmark-rtx5090-cuda-cob562.json",
+    "2026-10-24-typed-decisions-rtx5090-cuda-cob562.json"
+   ],
+   "models": [
+    "d3:edge",
+    "d3:lite",
+    "d3:nano",
+    "d3:mini",
+    "d3:flash",
+    "gliclass:v4-edge",
+    "decima:base-clean",
+    "winnow:e2b",
+    "jeb:9b",
+    "jeb:27b",
+    "jeeves:9b"
+   ]
+  }
+ ]
 }

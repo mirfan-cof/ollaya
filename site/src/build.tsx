@@ -15,9 +15,10 @@
  * The /v2/ prefix is reserved for the static model registry; nothing here may write under it.
  */
 import type { Child } from 'hono/jsx'
+import { withResults } from './data/numbers'
 import { Layout, type PageMeta } from './components/Layout'
-import { catalog, fullName, searchIndex } from './data/catalog'
-import { docPages } from './generated/content'
+import { catalog, featuredTags, fullName, getTag, searchIndex } from './data/catalog'
+import { blogPosts, docPages, readmes } from './generated/content'
 import { hasAsset, setAssetVersions } from './lib/assets'
 import { setBenchOrigin } from './lib/bench'
 import { setGithubStars } from './lib/stars'
@@ -25,12 +26,45 @@ import { DocsIndex, DocView, withOrigin } from './pages/docs'
 import { DownloadPage } from './pages/download'
 import { HomePage } from './pages/home'
 import { LibraryRedirect, ModelPage, TagPage, TagsPage } from './pages/library'
-import { robotsTxt, sitemapXml } from './pages/meta'
+import { blogPostingJsonLd, faqJsonLd, modelJsonLd, robotsTxt, sitemapXml, softwareJsonLd } from './pages/meta'
 import { NotFoundPage } from './pages/notFound'
 import { accuracyScatter, ResultsPage, speedDots } from './pages/results'
 import { DotPlot, Scatter } from './components/charts'
 import { runs } from './data/results'
 import { SearchPage } from './pages/search'
+import { TryPage } from './pages/try'
+import { MODEL } from './data/try'
+import { llmsFullTxt, llmsTxt } from './pages/llms'
+import { ContributorsPage } from './pages/contributors'
+import { StatsPage } from './pages/stats'
+import { BlogIndex, BlogPostView, rssXml } from './pages/blog'
+
+export { withReadmeBlocks } from './data/readme'
+
+/** The desktop app's model library (desktop/ui): its model cards and model pages, readme included. */
+function appLibrary() {
+  return {
+    models: catalog.map((m) => ({
+      name: m.name,
+      title: m.title,
+      description: m.description,
+      publisher: m.publisher?.name ?? null,
+      license: m.license,
+      caps: m.capabilities,
+      rank: m.rank,
+      stats: m.stats,
+      tags: featuredTags(m).map((t) => ({
+        name: fullName(m, t),
+        summary: t.summary,
+        // Pulling a router pulls the models it routes to.
+        size: t.kind === 'router' ? (t.routesTo ?? []).reduce((n, r) => n + (getTag(m, r)?.sizeBytes ?? 0), 0) : t.sizeBytes,
+        params: t.params ?? null,
+        languages: t.languages,
+      })),
+      readme: readmes[m.name] ? withResults(readmes[m.name]!) : null,
+    })),
+  }
+}
 
 export interface BuildOptions {
   /** Public origin without trailing slash, e.g. from the SITE_ORIGIN env var. */
@@ -60,7 +94,7 @@ interface Page {
 /** Every HTML page of the site. Also the sitemap, in this order. */
 function pages(origin: string): Page[] {
   const list: Page[] = [
-    { url: '/', meta: {}, render: () => <HomePage /> },
+    { url: '/', meta: { jsonLd: softwareJsonLd(origin), fullBleed: true }, render: () => <HomePage origin={origin} /> },
     {
       url: '/search',
       meta: {
@@ -92,6 +126,14 @@ function pages(origin: string): Page[] {
       render: () => <ResultsPage />,
     },
     {
+      url: '/stats',
+      meta: {
+        title: 'Stats',
+        description: 'How much Ollaya is used, week by week: model pulls, install script runs, GitHub stars and release downloads.',
+      },
+      render: () => <StatsPage />,
+    },
+    {
       url: '/docs',
       meta: {
         title: 'Docs',
@@ -100,11 +142,54 @@ function pages(origin: string): Page[] {
       },
       render: () => <DocsIndex />,
     },
-    ...docPages.map((page) => ({
-      url: `/docs/${page.slug}`,
-      meta: { title: page.title, description: page.description, nav: 'docs' as const },
-      render: () => <DocView page={page} html={withOrigin(page.html, origin)} />,
-    })),
+    // Only when the build bundled the in-browser runtime (scripts/build.mjs, step 2b).
+    ...(hasAsset('try.js')
+      ? [
+          {
+            url: '/try',
+            meta: {
+              title: 'Try it in your browser',
+              description: `${MODEL.name}:${MODEL.tag}, Ollaya's own open decision model, running in your browser. Nothing you type leaves the page.`,
+              nav: 'try' as const,
+            },
+            render: () => <TryPage />,
+          },
+        ]
+      : []),
+    {
+      url: '/contributors',
+      meta: {
+        title: 'Contributors',
+        description: 'The people who trained the models Ollaya runs, and the people who brought them to Ollaya.',
+      },
+      render: () => <ContributorsPage />,
+    },
+    {
+      url: '/blog',
+      meta: { title: 'Blog', description: 'Releases, models and measurements from Ollaya.', nav: 'blog' },
+      render: () => <BlogIndex />,
+    },
+    ...blogPosts.map((post) => {
+      const html = withResults(withOrigin(post.html, origin))
+      return {
+        url: `/blog/${post.slug}`,
+        meta: { title: post.title, description: post.summary, nav: 'blog' as const, jsonLd: blogPostingJsonLd(post, origin) },
+        render: () => <BlogPostView post={post} html={html} />,
+      }
+    }),
+    ...docPages.map((page) => {
+      const html = withResults(withOrigin(page.html, origin))
+      return {
+        url: `/docs/${page.slug}`,
+        meta: {
+          title: page.title,
+          description: page.description,
+          nav: 'docs' as const,
+          jsonLd: page.slug === 'faq' ? faqJsonLd(html) : undefined,
+        },
+        render: () => <DocView page={page} html={html} />,
+      }
+    }),
   ]
 
   for (const model of catalog) {
@@ -113,8 +198,8 @@ function pages(origin: string): Page[] {
     list.push(
       {
         url: `/library/${model.name}`,
-        meta: { title: model.name, description: model.description, nav: 'models', ogImage },
-        render: () => <ModelPage model={model} />,
+        meta: { title: model.name, description: model.description, nav: 'models', ogImage, jsonLd: modelJsonLd(model, origin) },
+        render: () => <ModelPage model={model} origin={origin} />,
       },
       {
         url: `/library/${model.name}/tags`,
@@ -185,6 +270,10 @@ export async function renderSite({ origin, bench, assetVersions, stars }: BuildO
   out.push({ path: 'robots.txt', body: robotsTxt(origin) })
   out.push({ path: 'sitemap.xml', body: sitemapXml(origin, all.map((p) => p.url)) })
   out.push({ path: 'search.json', body: `${JSON.stringify(searchIndex())}\n` })
+  out.push({ path: 'data/library.json', body: `${JSON.stringify(appLibrary())}\n` })
+  out.push({ path: 'llms.txt', body: llmsTxt(origin, bench, docPages, catalog) })
+  out.push({ path: 'llms-full.txt', body: llmsFullTxt(origin, docPages) })
+  out.push({ path: 'blog/rss.xml', body: rssXml(origin) })
   // The measurements behind /results, as the tools wrote them (../results/runs), under /data so they do not shadow the /results page.
   for (const { file, ...run } of runs) out.push({ path: `data/results/${file}`, body: `${JSON.stringify(run, null, 1)}\n` })
   // Two charts as their own .svg files, for the README (light and dark through prefers-color-scheme).

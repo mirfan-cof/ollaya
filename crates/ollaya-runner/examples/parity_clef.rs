@@ -2,7 +2,7 @@
 //! `ollaya_convert.families.clef.goldens` (the authors' `joint_schema_model.py`: `encode_record` and
 //! their model with the joint schema head, fp32).
 //!
-//!     cargo run --release -p ollaya-runner --example parity_clef -- <model-dir> <goldens.jsonl> [cpu|cuda] [--latency]
+//!     cargo run --release -p ollaya-runner --example parity_clef -- <model-dir> <goldens.jsonl> [cpu|cuda] [--latency] [--fp16] [--smoke]
 //!
 //! Every case is checked for its sequence first:
 //! * a request upstream rejects must be rejected, and each of its questions exactly when upstream
@@ -18,7 +18,6 @@
 //! `--latency` then times every accepted request again (p50, p95, and by question count).
 
 use std::collections::HashMap;
-use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -28,6 +27,8 @@ use ollaya_runner::Device;
 use ollaya_runner::clef::ClefModel;
 use ollaya_runner::engine::Engine;
 use serde_json::Value;
+
+mod smoke;
 
 /// Largest logit difference accepted (ONNX Runtime vs PyTorch, both fp32 on the BF16 weights).
 const LOGIT_TOL: f64 = 1e-3;
@@ -82,23 +83,27 @@ fn in_answer_order(q: &Question, option_ids: &[String], probs: &[f64]) -> Vec<f6
 }
 
 fn main() -> Result<()> {
-    let args: Vec<String> = std::env::args().collect();
+    let (args, smoke) = smoke::args();
     if args.len() < 3 {
-        bail!("usage: parity_clef <model-dir> <goldens.jsonl> [cpu|cuda] [--latency]");
+        bail!(
+            "usage: parity_clef <model-dir> <goldens.jsonl> [cpu|cuda] [--latency] [--fp16] [--smoke]"
+        );
     }
     let device = match args.get(3).map(String::as_str) {
         Some("cuda") => Device::Cuda(0),
         _ => Device::Cpu,
     };
     let latency = args.iter().any(|a| a == "--latency");
+    // An fp16 graph's gate (docs/decisions/0008-fp16-decoder-tags.md): the encoding stays exact, at least 99.5%
+    // of decisions match the fp32 reference, and the numbers are reported rather than bounded.
+    let fp16 = args.iter().any(|a| a == "--fp16");
     let t = Instant::now();
     let model = ClefModel::load(&PathBuf::from(&args[1]), device, None)?;
     println!("load {:.1}s on {device:?}", t.elapsed().as_secs_f64());
 
-    let file = std::fs::File::open(&args[2]).with_context(|| args[2].clone())?;
     let mut records = Vec::new();
-    for line in std::io::BufReader::new(file).lines() {
-        records.push(serde_json::from_str::<Value>(&line?)?);
+    for line in smoke::lines(&args[2], smoke)? {
+        records.push(serde_json::from_str::<Value>(&line)?);
     }
     let by_id: HashMap<&str, &Value> = records
         .iter()
@@ -244,10 +249,21 @@ fn main() -> Result<()> {
         percentile(&prob_diffs, 99),
         1000.0 * forward / cases.len().max(1) as f64,
     );
-    if logit_max > LOGIT_TOL || prob_diffs.last().is_some_and(|d| d.is_nan()) {
+    // One JSON line for `ollaya_convert.parity_run`, which records it in results/runs/.
+    println!(
+        "record: {}",
+        serde_json::json!({
+            "questions": nq,
+            "decisions_same": nq - disagree,
+            "max_logit_diff": logit_max,
+            "max_prob_diff": prob_diffs.last().copied().unwrap_or(0.0),
+            "p99_prob_diff": percentile(&prob_diffs, 99),
+        })
+    );
+    if !fp16 && logit_max > LOGIT_TOL || prob_diffs.last().is_some_and(|d| d.is_nan()) {
         bail!("logits differ by more than {LOGIT_TOL:e}");
     }
-    if disagree > 0 {
+    if disagree > if fp16 { nq / 200 } else { 0 } {
         bail!("decisions differ from the reference");
     }
 

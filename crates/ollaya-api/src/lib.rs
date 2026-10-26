@@ -12,6 +12,7 @@
 //!
 //! The server and the client both build on these types, so the contract lives in one place.
 
+#[cfg(not(target_arch = "wasm32"))]
 pub mod client;
 pub mod decide;
 pub mod error;
@@ -21,6 +22,7 @@ pub mod models;
 pub mod presets;
 pub mod validate;
 
+#[cfg(not(target_arch = "wasm32"))]
 pub use client::{Client, ClientError};
 pub use decide::{
     Answer, ChoiceAnswer, ChoiceCriteria, ChoiceQuestion, DecideAnswer, DecideRequest,
@@ -30,9 +32,10 @@ pub use decide::{
 pub use error::{ErrorBody, ErrorCode, Loc, ValidationIssue};
 pub use keep_alive::{KeepAlive, KeepAliveError};
 pub use models::{
-    CalibrationSpec, CopyRequest, CreateParameters, CreateRequest, DeleteRequest, License,
-    LocalModel, ModelDetails, ModelList, ModelMetadata, ProgressResponse, PsResponse, PullRequest,
-    RouterInfo, RunningModel, ShowRequest, ShowResponse, TagsResponse, VersionResponse,
+    Activity, ActivityResponse, CalibrationSpec, CopyRequest, CreateParameters, CreateRequest,
+    DeleteRequest, License, LocalModel, ModelDetails, ModelList, ModelMetadata, ProgressResponse,
+    PsResponse, PullRequest, RouterInfo, RunningModel, ShowRequest, ShowResponse, TagsResponse,
+    VersionResponse,
 };
 pub use presets::{
     CreatePresetRequest, PresetInfo, PresetRequest, PresetResponse, PresetsResponse,

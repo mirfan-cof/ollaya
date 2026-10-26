@@ -35,6 +35,7 @@ pub enum DeviceRequest {
     Auto,
     Cpu,
     Cuda(i32),
+    Rocm(i32),
     Vulkan(i32),
     Metal,
 }
@@ -46,6 +47,7 @@ impl std::str::FromStr for DeviceRequest {
             "auto" => Ok(DeviceRequest::Auto),
             "cpu" => Ok(DeviceRequest::Cpu),
             "cuda" => Ok(DeviceRequest::Cuda(0)),
+            "rocm" | "hip" => Ok(DeviceRequest::Rocm(0)),
             "vulkan" => Ok(DeviceRequest::Vulkan(0)),
             "metal" => Ok(DeviceRequest::Metal),
             s => s
@@ -53,12 +55,18 @@ impl std::str::FromStr for DeviceRequest {
                 .and_then(|n| n.parse().ok())
                 .map(DeviceRequest::Cuda)
                 .or_else(|| {
+                    s.strip_prefix("rocm:")
+                        .or_else(|| s.strip_prefix("hip:"))
+                        .and_then(|n| n.parse().ok())
+                        .map(DeviceRequest::Rocm)
+                })
+                .or_else(|| {
                     s.strip_prefix("vulkan:")
                         .and_then(|n| n.parse().ok())
                         .map(DeviceRequest::Vulkan)
                 })
                 .ok_or_else(|| {
-                    format!("unknown device {s:?}; use auto, cpu, cuda, cuda:<n>, vulkan, vulkan:<n> or metal")
+                    format!("unknown device {s:?}; use auto, cpu, cuda, cuda:<n>, rocm, rocm:<n>, vulkan, vulkan:<n> or metal")
                 }),
         }
     }
@@ -83,8 +91,8 @@ pub struct RunnerConfig {
     pub decision: PathBuf,
     /// The `arch` layer, for MLX.
     pub arch: Option<PathBuf>,
-    /// The author's weights file, for MLX.
-    pub weights: Option<PathBuf>,
+    /// The author's weights files, for MLX, in the arch layer's order.
+    pub weights: Vec<PathBuf>,
     pub device: DeviceRequest,
     pub threads: Option<usize>,
 }
@@ -126,25 +134,39 @@ fn load_llama(config: &RunnerConfig, gguf: &Path) -> Result<(Box<dyn Engine>, Lo
         .llama_dir
         .clone()
         .ok_or_else(|| Error::Model("a GGUF model needs --llama-dir".into()))?;
-    // The CUDA backend sits in the CUDA pack, where the daemon points argv[0] (as for ORT).
-    let cuda = std::env::args_os()
-        .next()
-        .map(PathBuf::from)
+    // The CUDA or ROCm backend sits in the GPU pack, where the daemon points argv[0] (as for ORT).
+    let argv0 = std::env::args_os().next().map(PathBuf::from);
+    let cuda = argv0
+        .as_ref()
         .and_then(|a| {
             a.parent()
                 .filter(|d| d.is_absolute())
                 .map(|d| d.join(crate::llama::CUDA_BACKEND))
         })
         .filter(|p| p.is_file());
+    let rocm = argv0
+        .as_ref()
+        .and_then(|a| {
+            a.parent()
+                .filter(|d| d.is_absolute())
+                .map(|d| d.join(crate::llama::ROCM_BACKEND))
+        })
+        .filter(|p| p.is_file())
+        .or_else(|| {
+            dir.parent()
+                .map(|p| p.join("rocm").join(crate::llama::ROCM_BACKEND))
+                .filter(|p| p.is_file())
+        });
     let target = match config.device {
         DeviceRequest::Auto => Target::Auto,
         DeviceRequest::Cpu => Target::Cpu,
         DeviceRequest::Cuda(id) => Target::Device(format!("CUDA{id}")),
+        DeviceRequest::Rocm(id) => Target::Device(format!("ROCm{id}")),
         DeviceRequest::Vulkan(id) => Target::Device(format!("Vulkan{id}")),
         // llama.cpp's own Metal backend (not MLX): ggml names the Apple GPU `MTL0`.
         DeviceRequest::Metal => Target::Device("MTL0".into()),
     };
-    let libs = Libraries { dir, cuda };
+    let libs = Libraries { dir, cuda, rocm };
     let model = LlamaModel::load(gguf, &config.decision, &libs, &target, config.threads)?;
     let allow_fallback = config.device == DeviceRequest::Auto && model.device != "cpu";
     let model = initialize_with_cpu_fallback(
@@ -197,9 +219,13 @@ pub fn load(config: &RunnerConfig) -> Result<(Box<dyn Engine>, Loaded), Error> {
     if let Some(gguf) = &config.gguf {
         return load_llama(config, gguf);
     }
-    if matches!(config.device, DeviceRequest::Vulkan(_)) {
+    if matches!(
+        config.device,
+        DeviceRequest::Vulkan(_) | DeviceRequest::Rocm(_)
+    ) {
         return Err(Error::Model(
-            "Vulkan currently runs GGUF models only; use auto or cpu for ONNX models".into(),
+            "ROCm and Vulkan currently run GGUF models only; use auto or cpu for ONNX models"
+                .into(),
         ));
     }
     let tokenizer = config
@@ -248,7 +274,10 @@ pub fn load(config: &RunnerConfig) -> Result<(Box<dyn Engine>, Loaded), Error> {
     }
     let device = onnx_device(config.device, cfg!(feature = "cuda-dynamic"));
     let gpu = match device {
-        DeviceRequest::Cpu | DeviceRequest::Metal | DeviceRequest::Vulkan(_) => None,
+        DeviceRequest::Cpu
+        | DeviceRequest::Metal
+        | DeviceRequest::Vulkan(_)
+        | DeviceRequest::Rocm(_) => None,
         DeviceRequest::Auto => Some(0),
         DeviceRequest::Cuda(id) => Some(id),
     };
@@ -581,6 +610,11 @@ async fn decide(State(s): State<Arc<AppState>>, Json(req): Json<DecideRequest>) 
     let result = s
         .thread
         .run(move || -> Result<Value, Error> {
+            if let Some(qid) = ordinal_unsupported(state.model.as_ref(), &req.questions) {
+                return Err(Error::Decision(ollaya_decision::Error::invalid(format!(
+                    "question {qid:?}: this model has no ordinal head; ask it without \"ordinal\""
+                ))));
+            }
             let images = req
                 .images
                 .iter()
@@ -618,6 +652,18 @@ async fn decide(State(s): State<Arc<AppState>>, Json(req): Json<DecideRequest>) 
         Err(Error::Image(e)) => error(StatusCode::BAD_REQUEST, "INVALID_IMAGE", &e.to_string()),
         Err(e) => error(StatusCode::INTERNAL_SERVER_ERROR, "RUNNER_ERROR", &e.to_string()),
     }
+}
+
+/// The first question asked with `"ordinal": true` of a model without an ordinal head.
+fn ordinal_unsupported(model: &dyn Engine, questions: &Value) -> Option<String> {
+    if model.ordinal() {
+        return None;
+    }
+    let (qid, _) = questions
+        .as_object()?
+        .iter()
+        .find(|(_, q)| q.get("ordinal") == Some(&Value::Bool(true)))?;
+    Some(qid.clone())
 }
 
 fn error(status: StatusCode, code: &str, message: &str) -> Response {
@@ -776,6 +822,10 @@ mod tests {
             ("cpu", DeviceRequest::Cpu),
             ("cuda", DeviceRequest::Cuda(0)),
             ("cuda:2", DeviceRequest::Cuda(2)),
+            ("rocm", DeviceRequest::Rocm(0)),
+            ("rocm:1", DeviceRequest::Rocm(1)),
+            ("hip", DeviceRequest::Rocm(0)),
+            ("hip:2", DeviceRequest::Rocm(2)),
             ("vulkan", DeviceRequest::Vulkan(0)),
             ("vulkan:2", DeviceRequest::Vulkan(2)),
             ("metal", DeviceRequest::Metal),
@@ -808,6 +858,23 @@ mod tests {
         fn preset(&self) -> Option<&Questions> {
             self.preset.as_ref()
         }
+    }
+
+    #[test]
+    fn ordinal_needs_an_ordinal_head() {
+        let model = Recorder {
+            preset: None,
+            asked: Mutex::default(),
+        };
+        let q = json!({
+            "a": {"type": "choice", "instructions": "x", "criteria": ["lo", "hi"], "ordinal": false},
+            "b": {"type": "choice", "instructions": "x", "criteria": ["lo", "hi"], "ordinal": true},
+        });
+        assert_eq!(super::ordinal_unsupported(&model, &q).as_deref(), Some("b"));
+        assert_eq!(
+            super::ordinal_unsupported(&model, &json!({"a": q["a"]})),
+            None
+        );
     }
 
     #[test]

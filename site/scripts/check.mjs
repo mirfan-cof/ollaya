@@ -55,7 +55,7 @@ const fileSet = new Set(files)
 
 // 2. CSS ---------------------------------------------------------------------------------------
 const css = await readFile(join(dist, 'static/app.css'), 'utf8').catch(() => '')
-for (const token of ['--color-canvas', '--color-fg', 'prefers-color-scheme:dark', '.prose']) {
+for (const token of ['--color-canvas', '--color-fg', '.frame', '.prose']) {
   if (!css.includes(token)) errors.push(`dist/static/app.css is missing ${token}`)
 }
 
@@ -89,6 +89,7 @@ for (const file of files.filter((f) => f.endsWith('.html'))) {
   const html = await readFile(join(dist, file), 'utf8')
   if (!html.startsWith('<!DOCTYPE html>')) errors.push(`dist/${file}: missing doctype`)
   if (/\{\{SITE_(ORIGIN|HOST)\}\}/.test(html)) errors.push(`dist/${file}: unreplaced {{SITE_ORIGIN}}/{{SITE_HOST}}`)
+  if (html.includes('{{result ')) errors.push(`dist/${file}: unreplaced {{result …}} reference`)
   if (/coming soon|pre-release|illustrative output|being built/i.test(html.replace(/<[^>]+>/g, ' '))) {
     errors.push(`dist/${file}: still says "coming soon", "pre-release", "illustrative output" or "being built"`)
   }

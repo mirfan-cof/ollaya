@@ -1,6 +1,6 @@
 //! `decima-late-interaction-v1` and `-v2`: Decima (`amyrmahdy/decima-small`, `-base`, `-agent`), an
 //! encoder with a late-interaction option scorer. Requests follow the author's `decima/systemone.py`,
-//! `decima/model.py` and `decima/render.py` at v2.2.0 (`ollaya_convert.families.decima.layout`);
+//! `decima/model.py` and `decima/render.py` at v2.3.0 (`ollaya_convert.families.decima.layout`);
 //! `docs/families/decima.md` is the spec.
 //!
 //! Every question becomes one state row and one row per option, each encoded on its own:
@@ -14,10 +14,9 @@
 //! ```
 //!
 //! `option_text` is `render.py`'s `choice_texts`. v2 (`option_fit`, the author's `choice_fit`): an
-//! option whose full text fits `max_option_tokens` (or has at most `max_option_tokens - 2`
-//! characters) keeps it, any other is fitted. v1: every option keeps its full text, unless cutting
-//! them makes two of the question's rows identical; then the question's options are rendered as in
-//! v2.
+//! option whose full text fits `max_option_tokens` keeps it, any other is fitted. v1: every option
+//! keeps its full text, unless cutting them makes two of the question's rows identical; then the
+//! question's options are rendered as in v2.
 //!
 //! * `text` is the question's instructions (the question id when they are absent or null; JSON
 //!   other than a string as `json.dumps(ensure_ascii=False)`). A noul question whose criteria give
@@ -112,6 +111,7 @@ pub struct DecimaLayout {
 /// `[yes, no]`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct DecimaQuestion {
+    /// The head that answers it ([`Question::head`]): an ordinal choice reads the score head.
     pub qtype: QType,
     pub state_ids: Vec<u32>,
     pub option_ids: Vec<Vec<u32>>,
@@ -269,6 +269,14 @@ impl DecimaLayout {
                         m.len()
                     )));
                 }
+                // The ordinal head was trained on at most 10 levels (decima bc02983).
+                if q.ordinal && !within(m.len(), self.limits.levels) {
+                    let [lo, hi] = self.limits.levels;
+                    return Err(bad(format!(
+                        "an ordinal choice takes {lo} to {hi} labels, got {}",
+                        m.len()
+                    )));
+                }
                 m.iter()
                     .map(|(label, v)| {
                         let d = text(Some(v));
@@ -375,8 +383,7 @@ impl DecimaLayout {
             |head: usize, option: &str| format!("{prefix}{} … {option}", words[..head].join(" "));
         let mut out = Vec::with_capacity(options.len());
         for (option, full) in options.iter().zip(full) {
-            // Upstream's shortcut: a token is at least one character (Python's `len`).
-            if full.chars().count() <= max_len - 2 || self.tokens(enc, &full)? <= max_len {
+            if self.tokens(enc, &full)? <= max_len {
                 out.push(full);
                 continue;
             }
@@ -439,7 +446,7 @@ impl DecimaLayout {
                 })
                 .collect::<Result<_, _>>()?;
             out.push(DecimaQuestion {
-                qtype: q.qtype,
+                qtype: q.head(),
                 state_ids,
                 option_ids,
                 state_truncated,
@@ -646,7 +653,7 @@ mod tests {
         [v1, v2]
     }
 
-    // The expected texts are upstream's `render.choice_texts` (v2.2.0) with the same toy tokenizers.
+    // The expected texts are upstream's `render.choice_texts` (v2.3.0) with the same toy tokenizers.
 
     #[test]
     fn fits_options_like_render_py() {
@@ -692,12 +699,10 @@ mod tests {
 
     #[test]
     fn fitting_follows_render_py_edges() {
-        // Upstream's shortcut counts characters: 16 characters keep the full text although they
-        // are 25 tokens, and the cut still makes both rows "p: ééééééééé ".
-        let want = [
-            "p: \u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9} yes",
-            "p: \u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9} no",
-        ];
+        // Tokens only (v2.3.0 dropped the 62-character shortcut): 16 characters that are 25 tokens
+        // are fitted, in v1 too because the cut makes both rows "p: ééééééééé ". The question's one
+        // word does not fit beside the option, so the option stands alone.
+        let want = ["p: yes", "p: no"];
         assert_eq!(
             texts(&Bytes, 24, &"\u{e9}".repeat(9), &["yes", "no"]),
             [want, want]
@@ -745,6 +750,25 @@ mod tests {
             assert!(encode(&l, state, noul.clone()).is_err());
         }
         assert!(encode(&l, json!([1, "a"]), noul).is_ok());
+    }
+
+    #[test]
+    fn ordinal_choices_read_the_score_head() {
+        let l = layout(512, 64);
+        let labels: Vec<String> = (0..10).map(|i| format!("c{i}")).collect();
+        let ten = json!({"q": {"type": "choice", "instructions": "x", "criteria": labels, "ordinal": true}});
+        let r = encode(&l, json!("s"), ten).unwrap();
+        assert_eq!(r.questions[0].qtype, QType::Score);
+        assert_eq!(r.questions[0].option_ids.len(), 10);
+        // The rows are a choice's: only the head differs.
+        let plain = json!({"q": {"type": "choice", "instructions": "x", "criteria": labels}});
+        assert_eq!(
+            encode(&l, json!("s"), plain).unwrap().questions[0].option_ids,
+            r.questions[0].option_ids
+        );
+        let labels: Vec<String> = (0..11).map(|i| format!("c{i}")).collect();
+        let eleven = json!({"q": {"type": "choice", "instructions": "x", "criteria": labels, "ordinal": true}});
+        assert!(encode(&l, json!("s"), eleven).is_err());
     }
 
     #[test]

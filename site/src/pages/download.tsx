@@ -1,6 +1,7 @@
 import type { Child } from 'hono/jsx'
 import { Icon } from '../components/Icon'
 import { btnPrimary, CodeBlock, textLink } from '../components/ui'
+import { benchGpu, result } from '../data/numbers'
 import { DOCKER_IMAGE, LATEST_DOWNLOAD, LOCAL_PORT, RELEASES_URL, WINDOWS_APP_SIGNED } from '../site'
 
 type Os = 'macos' | 'windows' | 'linux' | 'docker'
@@ -99,12 +100,12 @@ export function DownloadPage({ origin }: { origin: string }) {
   )
 
   return (
-    <div class="mx-auto max-w-2xl px-4 pt-12 md:px-6 md:pt-20">
-      <h1 class="text-center text-4xl font-medium tracking-tight text-fg md:text-5xl">Download Ollaya</h1>
+    <div class="mx-auto max-w-2xl px-6 pt-12 pb-16 md:pt-20">
+      <h1 class="text-center text-4xl font-semibold tracking-[-0.03em] text-fg md:text-5xl">Download Ollaya</h1>
       <p class="mt-4 text-center text-lg text-body">A desktop app and a command line for macOS, Windows and Linux, or a Docker image.</p>
 
       <div class="mt-10">
-        <div role="tablist" aria-label="Platform" data-os-tabs class="mx-auto flex w-full max-w-md gap-1 rounded-full border border-line p-1 sm:w-fit">
+        <div role="tablist" aria-label="Platform" data-os-tabs class="mx-auto flex w-full max-w-md gap-1 rounded-md border border-line p-1 sm:w-fit">
           {tabs.map((t) => {
             const on = t.id === selected
             return (
@@ -115,7 +116,7 @@ export function DownloadPage({ origin }: { origin: string }) {
                 aria-controls={`os-panel-${t.id}`}
                 aria-selected={on ? 'true' : 'false'}
                 tabindex={on ? 0 : -1}
-                class="flex-1 rounded-full px-2 py-1.5 text-sm font-medium text-muted hover:text-fg aria-selected:bg-btn aria-selected:text-btn-fg sm:flex-none sm:px-5"
+                class="flex-1 rounded-md px-2 py-1.5 text-sm font-medium text-muted hover:text-fg aria-selected:bg-btn aria-selected:text-btn-fg sm:flex-none sm:px-5"
               >
                 {t.label}
               </button>
@@ -139,8 +140,8 @@ export function DownloadPage({ origin }: { origin: string }) {
             <Step title="Run a model">
               <CodeBlock code="ollaya run winnow:e4b" />
               <Note>
-                The recommended model: close to Jev's accuracy, in about 90 ms on an NVIDIA GPU with 10 GB or more (an 8 GB
-                download). Otherwise, <code class="font-mono">ollaya run laya</code> answers in a fraction of a second, on the
+                The recommended model: close to Jev's accuracy, in {result('winnow:e4b', 'gpu.p50_ms', 0)} ms on an {benchGpu}. It needs an
+                NVIDIA GPU with 10 GB or more (an 8 GB download). Otherwise, <code class="font-mono">ollaya run laya</code> answers in a fraction of a second, on the
                 CPU too.
               </Note>
             </Step>
@@ -185,8 +186,8 @@ export function DownloadPage({ origin }: { origin: string }) {
             <Step title="Run a model">
               <CodeBlock code="ollaya run winnow:e4b" />
               <Note>
-                The recommended model: close to Jev's accuracy, in about 90 ms on an NVIDIA GPU with 10 GB or more (an 8 GB
-                download). Otherwise, <code class="font-mono">ollaya run laya</code> answers in a fraction of a second, on the
+                The recommended model: close to Jev's accuracy, in {result('winnow:e4b', 'gpu.p50_ms', 0)} ms on an {benchGpu}. It needs an
+                NVIDIA GPU with 10 GB or more (an 8 GB download). Otherwise, <code class="font-mono">ollaya run laya</code> answers in a fraction of a second, on the
                 CPU too.
               </Note>
             </Step>
@@ -252,13 +253,13 @@ export function DownloadPage({ origin }: { origin: string }) {
       </p>
 
       <div class="mt-16 grid gap-4 border-t border-line pt-10 sm:grid-cols-2">
-        <a href="/docs/quickstart" class="group rounded-lg border border-line p-5 hover:border-line-strong">
+        <a href="/docs/quickstart" class="group rounded-md border border-line p-5 hover:border-line-strong">
           <span class="flex items-center justify-between text-sm font-semibold text-fg">
             Quickstart <Icon name="arrowRight" class="size-4 transition-transform group-hover:translate-x-0.5" />
           </span>
           <span class="mt-1 block text-[15px] text-body">Pull a model, ask typed questions, call the API.</span>
         </a>
-        <a href="/search" class="group rounded-lg border border-line p-5 hover:border-line-strong">
+        <a href="/search" class="group rounded-md border border-line p-5 hover:border-line-strong">
           <span class="flex items-center justify-between text-sm font-semibold text-fg">
             Browse models <Icon name="arrowRight" class="size-4 transition-transform group-hover:translate-x-0.5" />
           </span>

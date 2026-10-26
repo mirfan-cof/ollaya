@@ -8,7 +8,7 @@ JevK5 is an open decision model by alibiserikbay, fine-tuned from Qwen3.5-4B and
 |---|---|---|---|
 | `jevk5:latest`, `jevk5:4b` | Qwen3.5-4B, JevK5 v0.3 | Q8_0 GGUF, 4.5 GB | easy 1.000, standard 0.944, hard 0.784 |
 
-The accuracies are the author's, from the [JevK5-GGUF card](https://huggingface.co/alibiserikbay/JevK5-GGUF): the Q8_0 file gives the same answer as the bf16 model on 229 of the 231 public JevBench items, with the same per-tier accuracy. They are the author's own runs, not official JevBench results. On typed-decisions (all 400 states, 2,000 questions, argmax against the majority label), measured by Ollaya, `jevk5:4b` scores 0.625, with a calibration error (ECE) of 0.093 at the shipped temperature.
+The accuracies are the author's, from the [JevK5-GGUF card](https://huggingface.co/alibiserikbay/JevK5-GGUF): the Q8_0 file gives the same answer as the bf16 model on 229 of the 231 public JevBench items, with the same per-tier accuracy. They are the author's own runs, not official JevBench results. On typed-decisions (all 400 states, 2,000 questions, argmax against the majority label), measured by Ollaya, `jevk5:4b` scores {{result jevk5:4b typed.accuracy 3}}, with a calibration error (ECE) of {{result jevk5:4b typed.ece 3}} at the shipped temperature.
 
 ## Usage
 
@@ -20,9 +20,9 @@ Point any TypeSafe client at `http://localhost:11435` and set the model to `jevk
 
 ## Speed
 
-- **RTX 4090, through the HTTP API:** the triage preset (five questions) on a short customer message takes 105 ms at the median of 15 warm requests.
-- **RTX 4090, in the runner:** on the parity fixtures, whose states are longer, five questions take about 288 ms at the median. Every question is its own pass over the whole prompt (see below), so the time grows with the state times the number of questions.
-- **CPU:** not measured by Ollaya. The author reports about 0.6 s per short decision on a 32- or 48-thread CPU server.
+- **RTX 5090, through the HTTP API (Ollaya Bench):** the triage preset (five questions) on a short customer message takes {{result jevk5:4b gpu.p50_ms 0}} ms at the median.
+- **State length:** every question is its own pass over the whole prompt (see below), so the time grows with the state times the number of questions.
+- **CPU:** {{result jevk5:4b cpu.p50_ms 0}} ms for the same request on the Threadripper 3960X (24 cores). The author reports about 0.6 s per short decision on a 32- or 48-thread CPU server.
 
 ## How it works
 
@@ -31,7 +31,7 @@ Point any TypeSafe client at `http://localhost:11435` and set the model to `jevk
 - **Options.** Up to 16 per question, labelled `A` to `P`. A yes/no question reads `true` as `A` and `false` as `B`.
 - **Calibration.** Temperature 1.22 over the letters, the value the author gives for the v0.3 4B files.
 - **Engine.** llama.cpp v0.5.0, ggml-org's own release build, runs inside Ollaya's runner process. It uses an NVIDIA GPU (CUDA) or an Apple silicon GPU (Metal) when the model fits, and the CPU otherwise.
-- **Parity.** Ollaya's runner matches stock llama.cpp (`llama-server` of the same build, on the same file) on CUDA (RTX 4090): the same decision on all 593 test questions, probabilities within 1.6e-6. The prompts are byte-identical to the author's `jevk5.prompt` on all 450 fixture prompts. Not checked yet: the CPU, Metal and Windows.
+- **Parity.** On CUDA, Ollaya's runner matches stock `llama-server` of the same build on the same file: the same decision on all {{result jevk5:4b parity.cuda.questions 0}} test questions, probabilities within 1.6e-6, with prompts byte-identical to the author's `jevk5.prompt`. Not checked yet: the CPU, Metal and Windows.
 
 ## Limits
 

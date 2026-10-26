@@ -43,6 +43,7 @@ through the matching type in `ollaya-api`, and request examples pass boundary va
 | `GET` | `/api/tags` | Models on this machine | no |
 | `POST` | `/api/show` | One model's details | no |
 | `GET` | `/api/ps` | Models loaded in memory | no |
+| `GET` | `/api/activity` | The latest decision requests | no |
 | `POST` | `/api/pull` | Download a model from a registry | yes (default) |
 | `DELETE` | `/api/delete` | Remove a local model | no |
 | `POST` | `/api/copy` | Copy a local model to a new name | no |
@@ -348,6 +349,15 @@ enforces 2–255 choices and 2–10 levels. The OpenAPI `min_length=1` is only t
 A one-option question carries no decision: its confidence formula divides by K − 1 = 0. There is
 also an asymmetry between the two directions of change. Relaxing a limit later is additive;
 tightening one would break clients. Starting strict keeps both directions open.
+
+**Ordinal choices (Decima extension).** A `choice` may carry `"ordinal": true` when its labels are in
+order (none, low, high; benign, suspicious, attack). The model then reads them with its ordinal
+head, the one score questions use, and the answer is still a `choice`. Only models with an ordinal
+head (Decima) take it; every other model refuses the request (`422 INVALID_REQUEST`), so the flag is
+never ignored. An ordinal choice takes 2–10 labels, the range the head was trained on. Any other value
+than `true`, `false` or `null` is a `bool_type` error, and `"ordinal": true` on a `score` or `noul`
+question is refused. The built-in preset `decima-guard-web` uses it, as Decima's own `/v1/systemone`
+does.
 
 **Types follow TypeSafe, not laya.** laya also accepts numbers and booleans as criteria and
 instructions, rendering them with `json.dumps`. TypeSafe rejects them, and so does this API
@@ -1135,7 +1145,7 @@ request body. Not paginated: the list is bounded by `OLLAYA_MAX_LOADED_MODELS`.
 | `models[].expires_at` | string \| `null` | When the model unloads if no further request arrives. While a request is running, the current time: the timer starts when the last request finishes. `null` when kept forever (`keep_alive` < 0). Ollama sends a far-future date instead; `null` is explicit. |
 | `models[].size_vram` | integer | Part of `size` in GPU memory; `0` on CPU |
 | `models[].context_length` | integer | The model's `max_len` in tokens |
-| `models[].device` | string | Where the runner computes: `cpu`, `cuda:0`, `vulkan:0` (GGUF models on Windows), `metal` (GGUF models on Apple silicon), … |
+| `models[].device` | string | Where the runner computes: `cpu`, `cuda:0`, `rocm:0` (GGUF models with ROCm pack), `vulkan:0` (GGUF models on Windows), `metal` (GGUF models on Apple silicon), … |
 
 ```shell
 curl http://localhost:11435/api/ps
@@ -1190,8 +1200,8 @@ Safe to retry.
 ### 7.11 Presets
 
 A preset is a named question set: `/api/decide` takes `preset` in place of `questions`, and
-`ollaya run --preset` takes its name. Six presets are built in (`triage`, `email`, `guard`,
-`moderation`, `router`, `agent`); they cannot be changed or deleted. Custom presets live in the
+`ollaya run --preset` takes its name. Eight presets are built in (`triage`, `email`, `guard`,
+`moderation`, `router`, `agent`, `decima-guard`, `decima-guard-web`); they cannot be changed or deleted. Custom presets live in the
 model store (`$OLLAYA_MODELS/presets/<name>.json`), so every client of the daemon sees the same
 ones. A custom preset is not a model: unlike a Modelfile's `QUESTIONS`, it works with any model.
 
@@ -1277,6 +1287,53 @@ Create is idempotent (the same request leaves the same file); delete behaves lik
 `501 NOT_IMPLEMENTED`. The registry is static (manifests are files published with the site), so
 there is nothing to push to yet. The paths are reserved with Ollama's semantics, so adding them
 later changes nothing else.
+
+### 7.13 `GET /api/activity`
+
+*Since 0.17.0.* The latest 100 decision requests that reached a model (`/api/decide` with a state,
+`/v1/systemone`, `/v1/decisions`), newest first, kept in memory and lost when the server stops. A
+request rejected before it reached a model (invalid body, queue full) is not listed. Only what the
+request was is kept, never its state or its answers. No request body. The desktop app shows it.
+
+| Response field | Type | Meaning |
+|---|---|---|
+| `total` | integer | Decision requests since the server started, listed or not |
+| `requests[].at` | string | When the answer or the error was sent |
+| `requests[].endpoint` | string | The path that was called |
+| `requests[].model` | string | The model that answered (a router's target), or the one asked for when the request failed |
+| `requests[].questions` | integer | Questions answered; `0` when the request failed |
+| `requests[].total_duration` | integer | Nanoseconds from the start of the request to its answer |
+| `requests[].error` | string | The [error code](#42-error-codes), only when the request failed |
+
+```shell
+curl http://localhost:11435/api/activity
+```
+
+<!-- json: ActivityResponse -->
+```json
+{
+  "total": 2,
+  "requests": [
+    {
+      "at": "2026-10-23T14:02:11.305Z",
+      "endpoint": "/v1/decisions",
+      "model": "nope:latest",
+      "questions": 0,
+      "total_duration": 412000,
+      "error": "MODEL_NOT_FOUND"
+    },
+    {
+      "at": "2026-10-23T14:02:10.871Z",
+      "endpoint": "/api/decide",
+      "model": "laya:en",
+      "questions": 5,
+      "total_duration": 18342000
+    }
+  ]
+}
+```
+
+Safe to retry.
 
 ---
 
@@ -1673,7 +1730,7 @@ These are the variables that change API behaviour.
 | `OLLAYA_ORIGINS` | unset | Extra allowed browser origins |
 | `OLLAYA_KEEP_ALIVE` | `5m` | Default `keep_alive` ([§6](#6-keep_alive)) |
 | `OLLAYA_MAX_LOADED_MODELS` | `3` | Loaded-model limit |
-| `OLLAYA_DEVICE` | `auto` | Runner device: `auto` (MLX on the Apple GPU for models with an arch layer in builds with the `mlx` feature, else CUDA if available, else CPU; on Windows, GGUF models without CUDA also use a discrete Vulkan GPU), `cpu`, `cuda`, `cuda:<n>`, `vulkan`, `vulkan:<n>` (GGUF only), `metal` |
+| `OLLAYA_DEVICE` | `auto` | Runner device: `auto` (MLX on the Apple GPU for models with an arch layer in builds with the `mlx` feature, else CUDA or ROCm if available, else CPU; on Windows, GGUF models without CUDA also use a discrete Vulkan GPU), `cpu`, `cuda`, `cuda:<n>`, `rocm`, `rocm:<n>` (GGUF only), `vulkan`, `vulkan:<n>` (GGUF only), `metal` |
 | `OLLAYA_THREADS` | unset | CPU threads for each loaded model: ONNX Runtime's intra-op threads, or llama.cpp's threads for GGUF models. Unset keeps each engine's default: ONNX Runtime's own, and for GGUF models half the CPUs available to the server on x86-64 (about one per physical core), all of them on arm64 |
 | `OLLAYA_MAX_QUEUE` | `512` | Queue bound before `503 QUEUE_FULL` |
 | `OLLAYA_LOAD_TIMEOUT` | `5m` | Load deadline before `500 MODEL_LOAD_FAILED` |

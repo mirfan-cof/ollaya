@@ -25,6 +25,8 @@ import {
   type ParityResult,
   type PublicResult,
 } from '../data/results'
+import { benchEdition, measured } from '../data/numbers'
+import { published } from '../data/catalog'
 
 const SUBSET_LABELS: Record<string, string> = {
   'vitaminc-dev': 'VitaminC',
@@ -76,10 +78,10 @@ function deviceTone(s: DeviceSeries): Tone {
 function Section({ id, title, lead, body, children }: { id: string; title: string; lead: string; body?: Child; children: Child }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} class="scroll-mt-24" data-section>
-      <h2 id={`${id}-title`} class="text-base font-semibold text-fg">
-        {title}
+      <p class="text-[13px] tracking-[0.14em] text-muted uppercase">{title}</p>
+      <h2 id={`${id}-title`} class="mt-3 max-w-3xl text-3xl leading-[1.05] font-semibold tracking-[-0.03em] text-fg md:text-4xl">
+        {lead}
       </h2>
-      <p class="mt-2 max-w-3xl text-2xl leading-tight font-medium tracking-tight text-fg md:text-3xl">{lead}</p>
       {body ? <p class="mt-4 max-w-3xl text-base text-body md:text-lg">{body}</p> : null}
       <div class="mt-10">{children}</div>
     </section>
@@ -88,8 +90,8 @@ function Section({ id, title, lead, body, children }: { id: string; title: strin
 
 function Stat({ value, label }: { value: string; label: string }) {
   return (
-    <div class="px-6 py-6 sm:px-7">
-      <p class="text-4xl font-semibold tracking-tight whitespace-nowrap text-fg tabular-nums lg:text-5xl">{value}</p>
+    <div class="bg-canvas px-6 py-8">
+      <p class="text-4xl font-semibold tracking-[-0.03em] whitespace-nowrap text-fg tabular-nums">{value}</p>
       <p class="mt-2 text-sm text-muted">{label}</p>
     </div>
   )
@@ -113,31 +115,45 @@ function totals() {
 function Overview() {
   const t = totals()
   return (
-    <div class="grid overflow-hidden rounded-2xl border border-line sm:grid-cols-2 lg:grid-cols-4">
+    <div class="rule grid gap-px bg-line sm:grid-cols-2 lg:grid-cols-4">
       <Stat value={nf.format(t.answers)} label="benchmark answers scored against human labels" />
-      <div class="border-t border-line sm:border-t-0 sm:border-l">
-        <Stat value={nf.format(t.parityQuestions)} label="questions checked against the authors' own code" />
-      </div>
-      <div class="border-t border-line lg:border-t-0 lg:border-l">
-        <Stat value={`${t.models}`} label="models measured" />
-      </div>
-      <div class="border-t border-line sm:border-l lg:border-t-0">
-        <Stat value={nf.format(t.requests)} label="requests timed on our GPUs and CPUs" />
-      </div>
+      <Stat value={nf.format(t.parityQuestions)} label="questions checked against the authors' own code" />
+      <Stat value={`${t.models}`} label="model tags measured" />
+      <Stat value={nf.format(t.requests)} label="requests timed on our GPUs and CPUs" />
     </div>
   )
 }
 
-/** The accuracy-against-latency chart's data (the page and the README's .svg share it). */
+/** The GPU the public benchmark ran on, as pages name it ("RTX 5090"). */
+const publicGpu = machines[publicBench?.machine ?? '']?.headline ?? 'GPU'
+const LOG_TICKS = [1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000, 10000]
+
+/**
+ * The accuracy-against-latency chart's data (the page and the README's .svg share it): one point per model and
+ * server, its most accurate tag, so the chart stays readable; the table under it lists every tag. The axes
+ * cover the points, so none sits outside them.
+ */
 export function accuracyScatter() {
-  const results = (publicBench?.results ?? []).filter((r) => r.errors < r.records * 0.05)
+  const best = new Map<string, PublicResult>()
+  for (const r of publicBench?.results ?? []) {
+    if (r.errors >= r.records * 0.05) continue
+    const key = `${r.server}/${shortName(r.model).split(':')[0]}`
+    const b = best.get(key)
+    if (!b || r.macro_accuracy > b.macro_accuracy || (r.macro_accuracy === b.macro_accuracy && r.median_ms < b.median_ms)) best.set(key, r)
+  }
+  const results = [...best.values()]
+  const xs = results.map((r) => r.median_ms)
+  const ys = results.map((r) => r.macro_accuracy)
+  const lo = Math.floor(Math.min(...ys) * 10)
+  const hi = Math.ceil(Math.max(...ys) * 10)
   return {
     points: results.map((r) => ({ label: r.model, x: r.median_ms, y: r.macro_accuracy, tone: tone(r), mark: r.server === 'ollama' ? ('ring' as const) : undefined })),
-    xTicks: [10, 20, 50, 100, 200, 500],
-    yTicks: [0.4, 0.5, 0.6, 0.7, 0.8],
+    // The 1-2-5 ticks from the one at or under the fastest point to the one at or over the slowest.
+    xTicks: LOG_TICKS.filter((t, i) => (LOG_TICKS[i + 1] ?? Infinity) > Math.min(...xs) && (LOG_TICKS[i - 1] ?? 0) < Math.max(...xs)),
+    yTicks: Array.from({ length: hi - lo + 1 }, (_, i) => (lo + i) / 10),
     xTitle: 'median latency per question (ms), log scale',
     yTitle: 'accuracy',
-    label: "Accuracy against median latency on Bespoke Labs' public benchmark, RTX 5090, Ollaya and Ollama",
+    label: `Accuracy against median latency on Bespoke Labs' public benchmark, ${publicGpu}, Ollaya and Ollama: the most accurate tag of each model`,
     legend: serverKeys(),
   }
 }
@@ -155,7 +171,8 @@ export function speedDots() {
     mark: machineOrder.indexOf(s.machine) === 0 ? 'dot' : 'ring',
   }))
   const models = new Set<string>()
-  for (const s of series) for (const m of s.p50.keys()) models.add(m)
+  // An -fp16 tag that was measured but not shipped (kev:0.8b-fp16, ADR 0008) stays in the raw data only.
+  for (const s of series) for (const m of s.p50.keys()) if (!m.endsWith('-fp16') || published(m)) models.add(m)
   const fastest = (m: string) => Math.min(...series.map((s) => s.p50.get(m) ?? Infinity))
   const rows = [...models]
     .sort((a, b) => fastest(a) - fastest(b))
@@ -171,17 +188,13 @@ export function speedDots() {
 
 function AccuracySpeed() {
   if (!publicBench) return null
-  const results = publicBench.results.filter((r) => r.errors < r.records * 0.05)
-  const ollama = publicBench.results.filter((r) => r.server === 'ollama')
-  const best = results.filter((r) => r.server === 'ollaya').sort((a, b) => b.macro_accuracy - a.macro_accuracy)[0]
-  const bestOllama = [...ollama].sort((a, b) => b.macro_accuracy - a.macro_accuracy)[0]
   const chart = accuracyScatter()
   return (
     <Section
       id="accuracy"
       title="Accuracy and speed"
       lead="Side by side with Ollama, on the same GPU."
-      body={`Ollaya is inspired by Ollama, which now serves two decision models of its own. Both ran Bespoke Labs' public decision benchmark: ${nf.format(3880)} human-labeled questions from 13 datasets, scored with Bespoke's own code, one request at a time on one RTX 5090.`}
+      body={`Every tag of Ollama ${publicBench.servers.ollama ?? ''}'s nine decision models and Ollaya's, on Bespoke Labs' public benchmark: ${nf.format(3880)} human-labeled questions from 13 datasets, one ${publicGpu}.`}
     >
       <Figure
         title="Accuracy against latency"
@@ -189,17 +202,80 @@ function AccuracySpeed() {
         legend={chart.legend}
         notes={
           <>
-            Accuracy: the mean over the 13 datasets. Latency: the median request (one question), HTTP included.
-            {best && bestOllama
-              ? ` The most accurate model, ${best.model}, scores ${best.macro_accuracy.toFixed(3)} at ${Math.round(best.median_ms)} ms; Ollama's best, ${bestOllama.model}, ${bestOllama.macro_accuracy.toFixed(3)} at ${Math.round(bestOllama.median_ms)} ms.`
-              : ''}{' '}
-            Models that reject more than 5 % of the questions (option limits, long states) are left out of the chart; the table under the heatmap lists them.
+            The most accurate tag of each model; every tag is in the table below, as are models that reject more than 5 % of the
+            questions. Mean accuracy over the 13 datasets; median request (one question) over HTTP.
           </>
         }
       >
         <Responsive wide={<Scatter {...chart} />} compact={<Scatter {...chart} compact />} />
       </Figure>
+      <Versus rows={publicBench.results} />
     </Section>
+  )
+}
+
+/** A long table folded under one line, so the charts above it stay the page's reading path. */
+function Fold({ title, children }: { title: string; children: Child }) {
+  return (
+    <details class="group mt-10 rounded-md border border-line">
+      <summary class="flex cursor-pointer list-none items-center justify-between gap-4 px-4 py-3 text-sm font-medium text-fg [&::-webkit-details-marker]:hidden">
+        {title}
+        <span class="text-muted transition-transform group-open:rotate-90" aria-hidden="true">›</span>
+      </summary>
+      <div class="overflow-x-auto border-t border-line">{children}</div>
+    </details>
+  )
+}
+
+/** Every model of both servers in one table: the public benchmark and typed-decisions, most accurate first. */
+function Versus({ rows }: { rows: PublicResult[] }) {
+  const typed = (r: PublicResult) => measured(r.server === 'ollama' ? `ollama/${r.model}` : shortName(r.model), 'typed.accuracy')
+  const num = 'px-4 py-2 text-right whitespace-nowrap'
+  return (
+    <Fold title={`Every model in a table (${rows.length} rows, with typed-decisions)`}>
+      <table class="w-full min-w-[40rem] text-left text-[13px] tabular-nums">
+        <caption class="sr-only">Every model of Ollaya and Ollama on the public benchmark and typed-decisions, most accurate first</caption>
+        <thead class="border-b border-line bg-subtle text-muted">
+          <tr>
+            <th scope="col" class="px-4 py-2.5 font-medium">Model</th>
+            <th scope="col" class="px-4 py-2.5 font-medium">Server</th>
+            <th scope="col" class="px-4 py-2.5 font-medium">Weights</th>
+            <th scope="col" class="px-4 py-2.5 text-right font-medium">Accuracy</th>
+            <th scope="col" class="px-4 py-2.5 text-right font-medium">ECE</th>
+            <th scope="col" class="px-4 py-2.5 text-right font-medium">Median</th>
+            <th scope="col" class="px-4 py-2.5 text-right font-medium">Typed-decisions</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-line">
+          {[...rows]
+            .sort((a, b) => b.macro_accuracy - a.macro_accuracy)
+            .map((r) => {
+              const t = typed(r)
+              return (
+                <tr>
+                  <th scope="row" class="px-4 py-2 font-mono font-normal text-fg">
+                    {r.model}
+                  </th>
+                  <td class="px-4 py-2" style={`color:${toneVar(tone(r))}`}>
+                    {r.server === 'ollama' ? 'Ollama' : 'Ollaya'}
+                  </td>
+                  <td class="px-4 py-2 text-muted">{r.weights ?? "the authors'"}</td>
+                  <td class={num}>
+                    {r.macro_accuracy.toFixed(3)}
+                    {rejectedNote(r) ? <span class="text-muted"> ({rejectedNote(r)})</span> : null}
+                  </td>
+                  <td class={num}>{r.pooled_ece.toFixed(3)}</td>
+                  <td class={num}>{Math.round(r.median_ms)} ms</td>
+                  <td class={num}>{t === undefined ? <span class="text-faint">·</span> : t.toFixed(3)}</td>
+                </tr>
+              )
+            })}
+        </tbody>
+      </table>
+      <p class="border-t border-line px-4 py-3 text-[13px] leading-relaxed text-muted">
+        Typed-decisions: 2,000 questions, argmax against the majority label. Weights: Ollama's own GGUF files, or the authors'.
+      </p>
+    </Fold>
   )
 }
 
@@ -215,7 +291,7 @@ function Calibration() {
       lead="Confidence you can put a threshold on."
       body={
         ollaya && ollama
-          ? `Expected calibration error (ECE) measures how far a model's confidence is from how often it is right. On the same Nimble weights, Ollaya's ECE is ${ollaya.pooled_ece.toFixed(3)} and Ollama's ${ollama.pooled_ece.toFixed(3)}: Ollaya applies each model's fitted temperature, Ollama returns the raw softmax.`
+          ? `How far confidence is from how often the model is right. Same Nimble weights: ${ollaya.pooled_ece.toFixed(3)} on Ollaya (the author's temperature), ${ollama.pooled_ece.toFixed(3)} on Ollama (raw softmax).`
           : "Expected calibration error (ECE) measures how far a model's confidence is from how often it is right."
       }
     >
@@ -239,7 +315,7 @@ function ByDataset() {
       id="datasets"
       title="Accuracy by dataset"
       lead="Where each model is strong, dataset by dataset."
-      body="Fact checking, intent, reading comprehension, paraphrase, inference, toxicity, safety, helpfulness, summary quality and biomedical questions. Each cell is the share of questions answered like the human label, in percent."
+      body="Each cell: the share of a dataset's questions answered like the human label."
     >
       <Figure title="Accuracy per dataset (%)" sub="darker is higher; rows sorted by the mean; Ollama's rows in orange">
         <Heatmap
@@ -250,7 +326,7 @@ function ByDataset() {
           rows={rows.map((r) => ({ label: label(r), tone: tone(r), values: columns.map((c) => r.per_subset[c.key]?.accuracy ?? null) }))}
         />
       </Figure>
-      <div class="mt-10 overflow-x-auto rounded-2xl border border-line">
+      <Fold title={`By question type, with rejected questions (${rows.length} rows)`}>
         <table class="w-full min-w-[40rem] text-left text-[13px] tabular-nums">
           <caption class="sr-only">Accuracy by question type, calibration error, latency and rejected questions per model</caption>
           <thead class="border-b border-line bg-subtle text-muted">
@@ -276,13 +352,13 @@ function ByDataset() {
                 <td class="px-4 py-2 text-right">{r.by_type.noul?.toFixed(3) ?? ''}</td>
                 <td class="px-4 py-2 text-right">{r.by_type.score?.toFixed(3) ?? ''}</td>
                 <td class="px-4 py-2 text-right">{r.pooled_ece.toFixed(3)}</td>
-                <td class="px-4 py-2 text-right">{Math.round(r.median_ms)} ms</td>
+                <td class="px-4 py-2 text-right whitespace-nowrap">{Math.round(r.median_ms)} ms</td>
                 <td class="px-4 py-2 text-right">{r.errors ? nf.format(r.errors) : '0'}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
+      </Fold>
     </Section>
   )
 }
@@ -297,13 +373,13 @@ function Speed() {
       id="speed"
       title="Speed on our machines"
       lead="Every model, on every machine we have."
-      body="The triage preset (five questions) on a short customer message, through the HTTP API, one request at a time: what a client sees. A different message for each request, so nothing is answered from a cache."
+      body="Five questions on a short message over HTTP, one request at a time, a new message each time."
     >
       <Figure
         title="Five questions, median request"
         sub="further left is faster; GPUs in blue, CPUs in orange, one mark per machine"
         legend={chart.series}
-        notes={`Ollaya ${latencyRuns[0]?.ollaya ?? ''}, Linux under WSL2. Each model: one load, ${gpuRun?.protocol?.warm ?? 5} untimed requests, then ${gpuRun?.protocol?.n ?? 20} timed ones${cpuRun ? ` (on the CPU ${cpuRun.protocol?.warm ?? 2} and ${cpuRun.protocol?.n ?? 10})` : ''}. A missing dot: the model did not run there or is still being measured.`}
+        notes={`Linux under WSL2. Each model: one load, ${gpuRun?.protocol?.warm ?? 5} untimed requests, then ${gpuRun?.protocol?.n ?? 20} timed ones${cpuRun ? ` (on the CPU ${cpuRun.protocol?.warm ?? 2} and ${cpuRun.protocol?.n ?? 10})` : ''}. A missing dot: the model did not run there or is still being measured.`}
       >
         <Responsive wide={<DotPlot {...chart} />} compact={<DotPlot {...chart} compact />} />
       </Figure>
@@ -326,10 +402,10 @@ function WindowsGpus() {
       id="windows"
       title="Windows: CUDA and Vulkan"
       lead="Vulkan brings GGUF models to any GPU."
-      body="Vulkan runs on NVIDIA, AMD and Intel GPUs without the 1.4 GB CUDA libraries (pull request #27). On the same RTX 4090 under Windows 11, Ollaya's runtime matched llama.cpp's own server on every question with both backends; CUDA is faster."
+      body="Vulkan runs on NVIDIA, AMD and Intel GPUs without the 1.4 GB CUDA libraries. Both backends match llama.cpp on every question; CUDA is faster."
     >
       <Figure
-        title="Five questions, median, RTX 4090 under Windows"
+        title={`Five questions, median, ${machines[run.machine ?? '']?.headline ?? 'GPU'} under Windows`}
         sub="the runtime without HTTP; lower is better"
         legend={[
           { label: 'CUDA', tone: 'gpu' },
@@ -349,7 +425,7 @@ function Parity() {
   // Runtime parity of library models (tags like `kev:4b`) on the devices Ollaya runs on; export
   // checks, research checkpoints and rejected providers stay in the raw data.
   const entries: ParityResult[] = parityRuns.flatMap((r) =>
-    r.results.filter((x) => x.kind !== 'export' && DEVICE_ORDER.includes(x.device) && x.pass !== null && x.pass !== undefined && /^[a-z0-9-]+:[\w.-]+$/.test(x.model)),
+    r.results.filter((x) => x.kind !== 'export' && DEVICE_ORDER.includes(x.device) && x.pass !== null && x.pass !== undefined && /^[a-z0-9-]+:[\w.-]+$/.test(x.model) && (!x.model.endsWith('-fp16') || published(x.model))),
   )
   if (!entries.length) return null
   const devices = DEVICE_ORDER.filter((d) => entries.some((e) => e.device === d))
@@ -368,9 +444,9 @@ function Parity() {
       id="parity"
       title="Parity"
       lead="The same answers as the authors' own code."
-      body="Before a model ships, Ollaya's runtime is compared question by question with a reference on each device: the authors' code in fp32 for ONNX models, and llama.cpp's own server of the same build for GGUF models. Every decision must be the same and every option score within 0.001."
+      body="Before a model ships, every decision must match the authors' code (or llama.cpp for GGUF), each option score within 0.001. -fp16 tags: at least 99.5 % of decisions the same."
     >
-      <div class="overflow-x-auto rounded-2xl border border-line">
+      <div class="overflow-x-auto rounded-md border border-line">
         <table class="w-full min-w-[32rem] text-left text-[13px] tabular-nums">
           <caption class="sr-only">Runtime parity per model and device: passed or outside the gate, with the number of questions compared</caption>
           <thead class="border-b border-line bg-subtle text-muted">
@@ -408,7 +484,7 @@ function Parity() {
         </table>
       </div>
       <p class="mt-4 max-w-3xl text-[13px] leading-relaxed text-muted">
-        The count is the number of questions compared. "Outside": measured, and over the gate on at least one question; that device does not run the model (details in the raw data). Per family:{' '}
+        Questions compared per device. "Outside": over the gate, so that device does not run the model. Per family:{' '}
         <a href="https://github.com/ollaya-dev/ollaya/tree/main/docs/families" class={textLink}>
           docs/families
         </a>
@@ -418,7 +494,7 @@ function Parity() {
         <div class="mt-14">
           <Figure
             title="Same prompt, different backends"
-            sub="largest difference in an option's log-probability against the RTX 4090's CUDA numbers"
+            sub={`largest difference in an option's log-probability against the ${machines[crossRun?.machine ?? '']?.headline ?? 'GPU'}'s CUDA numbers`}
             legend={[
               { label: 'CPU', tone: 'cpu' },
               { label: 'Vulkan', tone: 'vulkan' },
@@ -473,7 +549,7 @@ function BenchColumn({ m }: { m: Machine }) {
           <ul class="mt-2 space-y-1.5 text-[13px] leading-snug text-body" role="list">
             {m.uses.map((u) => (
               <li class="flex gap-2">
-                <span class="mt-[0.45rem] size-1 shrink-0 rounded-full bg-muted" aria-hidden="true"></span>
+                <span class="mt-[0.45rem] size-1 shrink-0 rounded-md bg-muted" aria-hidden="true"></span>
                 {u}
               </li>
             ))}
@@ -492,7 +568,7 @@ function TestBench() {
       id="bench"
       title="Test bench"
       lead="The machines behind these numbers."
-      body="Two desktops with NVIDIA GPUs and a Mac mini. Every number on this page was measured on one of them, with the same model files that ollaya pull fetches from each author's repository."
+      body="Every number here comes from these machines, with the files ollaya pull fetches."
     >
       <div class="grid gap-x-10 gap-y-12 md:grid-cols-3">
         {ours.map((m) => (
@@ -500,8 +576,7 @@ function TestBench() {
         ))}
       </div>
       <p class="mt-10 max-w-3xl text-[13px] leading-relaxed text-muted">
-        Software: Ollaya {latencyRuns[0]?.ollaya ?? '0.8.0'}, which runs ONNX models on ONNX Runtime (with NVIDIA's CUDA 13 libraries on the
-        GPUs), GGUF models on llama.cpp build b11146, and laya and nli on the Apple GPU through MLX.
+        Software: Ollaya {benchEdition.updates.at(-1) ?? benchEdition.ollaya}: ONNX Runtime with CUDA 13, llama.cpp for GGUF, MLX on the Apple GPU.
         {community.length ? (
           <>
             {' '}
@@ -552,26 +627,24 @@ export function ResultsPage() {
     .at(-1)
   return (
     <>
-      <header class="mx-auto max-w-6xl px-4 pt-10 md:px-6 md:pt-16">
-        <h1 class="text-4xl leading-[1.05] font-medium tracking-tight text-fg md:text-5xl">Results</h1>
+      <header>
+        <div class="px-6 py-12 md:px-10 md:py-16">
+        <h1 class="text-4xl leading-[1.05] font-semibold tracking-[-0.03em] text-fg md:text-5xl">Results</h1>
         <p class="mt-5 max-w-2xl text-lg text-body">
-          What we measure on our own GPUs and CPUs: how accurate each model is, how well its confidence is calibrated, how fast it runs,
-          and whether it gives the same answers as its authors' code. All numbers, with the raw data.
+          Accuracy, calibration, speed and parity, measured on our own GPUs and CPUs, with the raw data.
         </p>
         {newest ? <p class="mt-4 text-sm text-muted">Newest measurement: {newest.slice(0, 10)}</p> : null}
-        <p class="mt-6 max-w-2xl rounded-xl border border-line bg-subtle px-4 py-3 text-sm text-body">
-          Every model in the library, measured again on Ollaya's newest release with a score, intervals, memory and a page per
-          model:{' '}
+        <p class="mt-6 text-sm text-body">
+          Scores and a page per model:{' '}
           <a href={benchUrl()} class="font-medium text-fg underline underline-offset-4">
             Ollaya Bench
           </a>
-          . This page keeps the earlier runs, the comparison with Ollama and the CUDA, Vulkan and parity measurements.
+          .
         </p>
-        <div class="mt-10">
-          <Overview />
         </div>
+        <Overview />
       </header>
-      <div class="mx-auto mt-20 max-w-6xl px-4 pb-24 md:mt-28 md:px-6 lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-16">
+      <div class="rule px-6 py-16 md:px-10 md:py-20 lg:grid lg:grid-cols-[11rem_minmax(0,1fr)] lg:gap-16">
         <nav aria-label="Sections" class="hidden lg:block">
           <ul class="sticky top-28 -ml-3.5 space-y-2.5 text-sm" data-scrollspy>
             {sections.map((s) => (

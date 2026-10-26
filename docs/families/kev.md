@@ -148,6 +148,23 @@ The port reproduces upstream token rows, decide positions and option positions o
 requests**: 77 Laya edge cases, 4 decoder cases and 400 typed-decisions rows. It also rejects the same
 requests; for example, list-valued choice criteria get a pydantic 422 in both.
 
+## fp16 tags
+
+`kev:4b-fp16` and `kev:9b-fp16` run the same weights with the trunk in fp16 on NVIDIA GPUs ([ADR 0008](../decisions/0008-fp16-decoder-tags.md)).
+The RMSNorms, the gated delta rule, the attention softmax, the rotary frequencies, the masks and the heads stay fp32,
+as the authors' code computes them. The gate (`parity_kev --fp16`, run by `parity_run`) keeps the encodings exact and
+requires at least 99.5 % of the decisions to match the fp32 reference. On the RTX 4090
+(`results/runs/2026-10-19-parity-rtx4090-cuda.json`):
+
+| Tag | Decisions the same | Max option logit diff | Max probability diff (p99) |
+|---|---|---:|---:|
+| `kev:4b-fp16` | 478 / 480 (99.58 %) | 6.5e-02 | 3.9e-03 (2.2e-03) |
+| `kev:9b-fp16` | 480 / 480 (100.00 %) | 2.7e-02 | 2.4e-03 (1.8e-03) |
+
+`kev:0.8b` has no fp16 tag: its fp16 graph passed the gate (478 / 480), but after the `Split` rewrite the fp32 graph
+is as fast on an RTX 5090 (62 ms against 67 ms for five questions), so it is not shipped. The fp32 tags are unchanged and still match the authors' code. Speed and typed-decisions accuracy of
+the fp16 tags are on the model page and on bench.ollaya.dev. On a CPU an fp16 tag runs, slowly; use the fp32 tag there.
+
 ## Limits
 
 - **Options.** Choice 1..255; score 1..255 levels. TypeSafe caps score at 10; kev does not.
@@ -263,6 +280,34 @@ from upstream (max 1.0e-4, its 4-decimal rounding).
   the fusion is worth nothing here. The setting can go once `ort` links ORT 1.30 or newer.
 - **Larger checkpoints.** The 4b and 9b graphs have the same head, with 2,560 and 4,096 inputs; the
   workaround applies to every kev session.
+
+## Metal parity (MLX)
+
+The MLX engine ([decision record](../decisions/0001-mlx-engine.md), phase 4) runs kev-0.8b on the
+Apple GPU from the three upstream files, the base shard, `adapter_model.safetensors` and `head.pt`,
+with the `pointer` arch layer: the Qwen3.5 backbone of `crates/ollaya-runner/src/mlx/qwen35.rs`
+with the LoRA merged into its linear layers when the model loads (`W + 2.0 · B A` in float32, peft's
+merge; the ONNX graph keeps the adapter unmerged, which lands within rounding), and the `PointerHead`
+recomputed in `mlx/heads.rs`. It is built with the `mlx` feature, which is not in releases yet.
+
+```sh
+cargo run --release -p ollaya-runner --features mlx --example parity_kev -- convert/out/kev-0.8b convert/out/goldens-kev-0.8b.jsonl metal
+```
+
+Apple M4 Pro, macOS 27, goldens made on this Mac (`kev.goldens`, CPU fp32, `--td-limit 20`), the
+same gate as above (option logits within 1e-3, same decisions):
+
+| kev-0.8b r15 | MLX on Metal | ONNX Runtime CPU, same Mac |
+|---|---|---|
+| rejections, token rows, decide and option positions | 0 mismatches (117 cases, 16 rejected as upstream, 480 questions, 68,729 tokens) | same |
+| max \|Δ option logit\| | 3.1e-5 | 4.5e-5 |
+| decisions agree | **100 %** | **100 %** |
+| max \|Δ probability\| | 2.7e-6 (p99 2.2e-6) | 3.8e-6 (p99 2.7e-6) |
+| TypeSafe answers vs upstream | 0 differ, max 1.0e-4 (rounding) | 0 differ, max 1.0e-4 |
+| all requests, in process | 39.3 s (389 ms per request) | 103.4 s (1,024 ms per request) |
+
+kev-4b and kev-9b are the same architecture; their parity on Metal is not run here (4B in fp32 is
+about 17 GB on this Mac's unified memory), so they stay on ONNX Runtime until it is.
 
 ## Typed-decisions quality (measured, for the catalog comparison)
 

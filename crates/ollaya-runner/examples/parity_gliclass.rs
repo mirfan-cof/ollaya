@@ -1,7 +1,7 @@
 //! Compare the `gliclass-uni-v1` engine against goldens from the Python reference
 //! (`ollaya_convert.families.gliclass.goldens`).
 //!
-//!     cargo run --release -p ollaya-runner --example parity_gliclass -- <model-dir> <goldens.jsonl> [cpu|cuda|metal]
+//!     cargo run --release -p ollaya-runner --example parity_gliclass -- <model-dir> <goldens.jsonl> [cpu|cuda|metal] [--smoke]
 //!
 //! Per question:
 //! * the upstream call (labels, prompt, mode) and input text must match exactly;
@@ -12,7 +12,6 @@
 //! A question the reference rejects must fail the whole request with `TooManyOptions` naming it;
 //! the request's other questions are then checked without it.
 
-use std::io::BufRead;
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -22,6 +21,8 @@ use ollaya_decision::parse_questions;
 use ollaya_runner::gliclass::GliclassModel;
 use ollaya_runner::{Device, Error};
 use serde_json::Value;
+
+mod smoke;
 
 /// Max absolute option-logit difference against the fp32 reference.
 const LOGIT_TOL: f64 = 1e-3;
@@ -54,9 +55,9 @@ fn p99(v: &mut [f64]) -> f64 {
 fn main() -> Result<()> {
     // SAFETY: first thing in main, before any thread starts (MLX reads its settings once).
     unsafe { ollaya_runner::prepare_process() };
-    let args: Vec<String> = std::env::args().collect();
+    let (args, smoke) = smoke::args();
     if args.len() < 3 {
-        bail!("usage: parity_gliclass <model-dir> <goldens.jsonl> [cpu|cuda|metal]");
+        bail!("usage: parity_gliclass <model-dir> <goldens.jsonl> [cpu|cuda|metal] [--smoke]");
     }
     let device = match args.get(3).map(String::as_str) {
         Some("cuda") => Device::Cuda(0),
@@ -72,15 +73,14 @@ fn main() -> Result<()> {
         special: serde_json::from_value::<GliclassTokens>(decision["special_tokens"].clone())?,
         sanitize: serde_json::from_value(decision["sanitize"].clone())?,
     };
-    let file = std::fs::File::open(&args[2]).with_context(|| args[2].clone())?;
 
     let (mut cases, mut questions, mut call_bad, mut enc_bad, mut logit_bad, mut disagree) =
         (0, 0, 0, 0, 0, 0);
     let (mut rejected, mut reject_bad) = (0, 0);
     let (mut logit_diffs, mut prob_diffs) = (Vec::new(), Vec::new());
     let mut run_time = std::time::Duration::ZERO;
-    for line in std::io::BufReader::new(file).lines() {
-        let rec: Value = serde_json::from_str(&line?)?;
+    for line in smoke::lines(&args[2], smoke)? {
+        let rec: Value = serde_json::from_str(&line)?;
         let id = rec["id"].as_str().unwrap_or("?").to_owned();
         let mut qs = parse_questions(&rec["questions"])?;
         cases += 1;
@@ -191,16 +191,30 @@ fn main() -> Result<()> {
     }
 
     let compared = questions - enc_bad;
+    let (logit_max, prob_max) = (
+        logit_diffs.iter().copied().fold(0.0, f64::max),
+        prob_diffs.iter().copied().fold(0.0, f64::max),
+    );
+    let (logit_p99, prob_p99) = (p99(&mut logit_diffs), p99(&mut prob_diffs));
     println!(
         "{cases} cases, {questions} questions (+{rejected} rejected, {reject_bad} wrong) | call/text mismatches: {call_bad} \
-         | encoding mismatches: {enc_bad} | logit diff max {:.1e} p99 {:.1e} ({logit_bad} > {LOGIT_TOL:.0e}) \
-         | decisions agree: {:.2}% ({disagree} differ) | prob diff max {:.1e} p99 {:.1e} | run {:.2}s",
-        logit_diffs.iter().copied().fold(0.0, f64::max),
-        p99(&mut logit_diffs),
+         | encoding mismatches: {enc_bad} | logit diff max {logit_max:.1e} p99 {logit_p99:.1e} ({logit_bad} > {LOGIT_TOL:.0e}) \
+         | decisions agree: {:.2}% ({disagree} differ) | prob diff max {prob_max:.1e} p99 {prob_p99:.1e} | run {:.2}s",
         100.0 * (compared - disagree) as f64 / compared.max(1) as f64,
-        prob_diffs.iter().copied().fold(0.0, f64::max),
-        p99(&mut prob_diffs),
         run_time.as_secs_f64(),
+    );
+    // One JSON line for `ollaya_convert.parity_run`, which records it in results/runs/.
+    println!(
+        "record: {}",
+        serde_json::json!({
+            "questions": questions,
+            "rejected_questions": rejected,
+            "decisions_same": compared - disagree,
+            "encoding_mismatches": enc_bad,
+            "max_logit_diff": logit_max,
+            "max_prob_diff": prob_max,
+            "p99_prob_diff": prob_p99,
+        })
     );
     if call_bad + enc_bad + reject_bad + logit_bad + disagree > 0 {
         bail!("gliclass parity failed");
