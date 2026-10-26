@@ -417,6 +417,80 @@ mod tests {
         }
     }
 
+    /// Render through the shared parser, returning the error text instead of panicking.
+    fn render_err(def: &Value) -> String {
+        let c = config();
+        let prefix = c.state_prefix(&json!("s"), tok).unwrap();
+        let q = crate::question::Question::parse("q", def).unwrap();
+        c.render::<Error>("q", &q, &prefix, tok)
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn choice_as_a_list_of_labels_matches_reference() {
+        // ref.py: a list of labels is {label: None}; duplicates collapse onto their first position.
+        let r = render(
+            &config(),
+            &json!("s"),
+            "q",
+            &json!({"type": "choice", "instructions": "Which team?",
+                    "criteria": ["billing", "tech", "billing", "sales"]}),
+        );
+        assert_eq!(r.names, ["billing", "tech", "sales"]);
+        assert!(text_of(&r.ids).ends_with(
+            "Question [choice]: Which team?\nOptions:\n- billing ->\n- tech ->\n- sales ->\n"
+        ));
+        assert_eq!(r.slots.len(), 3);
+    }
+
+    #[test]
+    fn noul_keys_in_any_case_match_reference() {
+        // ref.py lower-cases the keys; the names stay ["false", "true"].
+        let r = render(
+            &config(),
+            &json!("s"),
+            "q",
+            &json!({"type": "noul", "instructions": "Finished?",
+                    "criteria": {"TRUE": "it is done", "False": "still open"}}),
+        );
+        assert_eq!(r.names, ["false", "true"]);
+        assert!(text_of(&r.ids).ends_with("- false: still open ->\n- true: it is done ->\n"));
+    }
+
+    #[test]
+    fn score_levels_outside_two_to_ten_are_rejected() {
+        for n in [1, 11] {
+            let levels: Vec<String> = (0..n).map(|i| format!("level {i}")).collect();
+            let e = render_err(&json!({"type": "score", "instructions": "How bad?",
+                                       "criteria": levels}));
+            assert!(e.contains("2..10 level descriptions"), "{n} levels: {e}");
+        }
+        for n in [2, 10] {
+            let levels: Vec<String> = (0..n).map(|i| format!("level {i}")).collect();
+            let r = render(
+                &config(),
+                &json!("s"),
+                "q",
+                &json!({"type": "score", "instructions": "How bad?", "criteria": levels}),
+            );
+            assert_eq!(r.slots.len(), n);
+        }
+    }
+
+    #[test]
+    fn non_string_or_blank_instructions_are_rejected() {
+        for ins in [
+            json!({"text": "ok?"}),
+            json!(["ok?"]),
+            json!(3),
+            json!("  "),
+        ] {
+            let e = render_err(&json!({"type": "noul", "instructions": ins}));
+            assert!(e.contains("non-empty string"), "{ins}: {e}");
+        }
+    }
+
     #[test]
     fn probabilities_softmax() {
         let p = probabilities(&[2.0, 0.0], 1.0);

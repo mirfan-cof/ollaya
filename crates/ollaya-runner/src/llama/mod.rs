@@ -609,6 +609,13 @@ fn prepare(vocab: &Vocab, decision: &Value) -> Result<Layout, Error> {
                     jev_style::BLOCK
                 )));
             }
+            let n_seq_max = llama.get("n_seq_max").and_then(Value::as_u64).unwrap_or(1);
+            if n_seq_max < 2 {
+                return Err(model_error(format!(
+                    "jev-style: decision.json llama.n_seq_max is {n_seq_max}; it must be at least \
+                     2 (the state in sequence 0, each question copied into sequence 1)"
+                )));
+            }
             Layout::JevStyle(cfg)
         }
         Some(jebadiah::LAYOUT) => {
