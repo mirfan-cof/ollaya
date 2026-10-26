@@ -390,7 +390,7 @@ class JevStyle:
                             "n_outputs_max": 512, "kv_unified": True}
 
     def encode(self, state, questions):
-        raise NotImplementedError("jev-style logit-parity goldens need the author's jev-score-v2")
+        raise NotImplementedError("jev-style goldens: python -m ollaya_convert.families.jev_style.goldens")
 
 
 def error_class(layout, lay, state, questions, e):
@@ -486,8 +486,8 @@ def main():
             json.dump(cal, f, indent=2)
         if a.layout == "jev-style":
             print("%s: decision.json + calibration.json written. jev-style uses a non-causal "
-                  "verdict readout; logit-parity goldens need the author's jev-score-v2, not the "
-                  "causal llama-server plan." % out)
+                  "verdict readout: its goldens come from the author's jev-score-v2, not the causal "
+                  "llama-server plan (python -m ollaya_convert.families.jev_style.goldens)." % out)
             return
 
         plan = FixedPlan(post_to(srv.url))

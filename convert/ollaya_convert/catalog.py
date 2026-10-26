@@ -53,9 +53,10 @@ def _laya(sub, description, params, ctx, languages, mlx=False, repo=LAYA_REPO, c
     }
 
 
-def _gguf(export, repo, commit, gguf, description, params, languages, notice=None):
+def _gguf(export, repo, commit, gguf, description, params, languages, notice=None, tokenizer=None):
     """A GGUF model run by llama.cpp: the author's GGUF, unmodified, plus the decision.json and
-    calibration.json that `llm_common/export_llama.py` derived from it (`out/<export>`)."""
+    calibration.json that `llm_common/export_llama.py` derived from it (`out/<export>`). `tokenizer`: the
+    author's tokenizer.json in `repo`, for a layout that renders with it instead of the GGUF's vocabulary."""
     return {
         "kind": "gguf",
         "repo": repo,
@@ -66,6 +67,7 @@ def _gguf(export, repo, commit, gguf, description, params, languages, notice=Non
         "languages": languages,
         "description": description,
         "notice": notice,
+        "tokenizer": tokenizer,
     }
 
 
@@ -1041,16 +1043,25 @@ CATALOG = {
                         "are the author's.\n"
                         "Licensed under the Apache License, Version 2.0.\n\n" + LICENSE_APACHE,
         "tags": {
-            # Jev-Style-2B-Decision-v3, Q4_K_M. The GGUF holds the weights, tokenizer and the
-            # readout tokens (' yes' 9542, ' no' 874, ' ->' 1411); jev-score-v2 is reproduced by the runner.
-            "2b": _gguf("jev-style-2b-q4_k_m", "chaoliangUNSW/Jev-Style-2B-Decision-v3-GGUF",
+            # Jev-Style-2B-Decision-v3. The GGUF holds the weights and the readout tokens (' yes' 9542,
+            # ' no' 874, ' ->' 1411); the render uses the author's tokenizer.json, which the runtime the
+            # author measured uses (llama.cpp's own pre-tokenizer splits some scripts, e.g. Devanagari and
+            # Arabic, differently). Q8_0 is the default: the card puts Q4_K_M at 95.7 % top-1 agreement with
+            # fp32 and calls it noisier on long inputs.
+            "2b": _gguf("jev-style-2b-q8_0", "chaoliangUNSW/Jev-Style-2B-Decision-v3-GGUF",
                         "283b9eb7903aeb184b16d49ab8f38b256f4afcb3",
-                        "Jev-Style-2B-Decision-v3-Q4_K_M.gguf",
-                        "Jev-Style-2B-Decision-v3 (Qwen3.5-2B fine-tune), Q4_K_M GGUF on llama.cpp: a "
+                        "Jev-Style-2B-Decision-v3-Q8_0.gguf",
+                        "Jev-Style-2B-Decision-v3 (Qwen3.5-2B fine-tune), Q8_0 GGUF on llama.cpp: a "
                         "non-causal block-attention decision model, the verdict readout logit(' yes') - "
                         "logit(' no') at each option's ' ->' slot, with the author's global temperature 0.828. "
-                        "No option cap.",
-                        "2B", ["en"]),
+                        "No option cap; up to 25,600 input tokens.",
+                        "2B", ["en"], tokenizer="tokenizer/tokenizer.json"),
+            "2b-q4_k_m": _gguf("jev-style-2b-q4_k_m", "chaoliangUNSW/Jev-Style-2B-Decision-v3-GGUF",
+                               "283b9eb7903aeb184b16d49ab8f38b256f4afcb3",
+                               "Jev-Style-2B-Decision-v3-Q4_K_M.gguf",
+                               "Jev-Style-2B-Decision-v3, Q4_K_M GGUF (1.3 GB): the smaller download, 95.7 % "
+                               "top-1 agreement with fp32 by the author's measurement and noisier on long inputs.",
+                               "2B", ["en"], tokenizer="tokenizer/tokenizer.json"),
         },
         "aliases": {"latest": "2b"},
         "parity": "Prompt parity: the render matches the model's own jev_style_decision_gguf.py "

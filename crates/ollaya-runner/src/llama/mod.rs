@@ -238,6 +238,9 @@ pub struct LlamaModel {
     vocab: Vocab,
     layout: Layout,
     settings: LlamaSettings,
+    /// The author's `tokenizer.json`, for a layout that renders with it instead of the GGUF's
+    /// vocabulary (jev-style: llama.cpp's pre-tokenizer splits some scripts differently).
+    tokenizer: Option<tokenizers::Tokenizer>,
     /// `cuda:0`, `metal` or `cpu`.
     pub device: String,
     /// The GGUF's type (`Q8_0`).
@@ -721,6 +724,9 @@ fn prepare(vocab: &Vocab, decision: &Value) -> Result<Layout, Error> {
     Ok(layout)
 }
 
+/// A `jev-style-v1` request's state prefix and each question's render, in request order.
+pub type JevStyleRender = (Vec<u32>, Vec<(String, jev_style::Rendered)>);
+
 impl LlamaModel {
     /// `jev-style-v1` (chaoliangUNSW/Jev-Style-2B-Decision-v3): non-causal block attention + verdict
     /// readout, mirroring the model's own jev-score-v2. The state decodes into sequence 0 once; each
@@ -734,18 +740,7 @@ impl LlamaModel {
         cfg: &JevStyleConfig,
     ) -> Result<Output, Error> {
         let api = self.handles.api;
-        let parsed = ollaya_decision::parse_questions(questions)?;
-        let vocab = &self.vocab;
-        let mut tok = |t: &str| {
-            vocab
-                .tokenize(t, false, false)
-                .map(|v| v.into_iter().map(|x| x as u32).collect::<Vec<u32>>())
-        };
-        let prefix = cfg.state_prefix(state, &mut tok)?;
-        let rendered: Vec<(&String, jev_style::Rendered)> = parsed
-            .iter()
-            .map(|(qid, q)| Ok((qid, cfg.render::<Error>(qid, q, &prefix, &mut tok)?)))
-            .collect::<Result<_, Error>>()?;
+        let (prefix, rendered) = self.render_jev_style(state, questions, cfg)?;
         // Reject an input the context cannot hold, before any decode (a clean 422, not a 500
         // from inside llama_decode). A unified KV cache lets each sequence use the whole context.
         let capacity = if self.settings.kv_unified {
@@ -831,6 +826,46 @@ impl LlamaModel {
             state_tokens: prefix.len(),
             state_truncated: false,
         })
+    }
+
+    /// `jev-style-v1`: the state prefix and each question's render (ids, verdict slots, attention
+    /// blocks) with this GGUF's tokenizer, as [`Self::run_json`] decodes them. For the parity gate.
+    pub fn jev_style_render(
+        &self,
+        state: &Value,
+        questions: &Value,
+    ) -> Result<JevStyleRender, Error> {
+        match &self.layout {
+            Layout::JevStyle(cfg) => self.render_jev_style(state, questions, cfg),
+            _ => Err(model_error("not a jev-style model")),
+        }
+    }
+
+    fn render_jev_style(
+        &self,
+        state: &Value,
+        questions: &Value,
+        cfg: &JevStyleConfig,
+    ) -> Result<JevStyleRender, Error> {
+        let parsed = ollaya_decision::parse_questions(questions)?;
+        let tokenizer = self.tokenizer.as_ref().ok_or_else(|| {
+            model_error(
+                "jev-style renders with the author's tokenizer.json, and this model has none \
+                 (the package's tokenizer layer)",
+            )
+        })?;
+        let mut tok = |t: &str| {
+            tokenizer
+                .encode(t, false)
+                .map(|e| e.get_ids().to_vec())
+                .map_err(|e| Error::Decision(ollaya_decision::Error::Tokenizer(e.to_string())))
+        };
+        let prefix = cfg.state_prefix(state, &mut tok)?;
+        let rendered = parsed
+            .iter()
+            .map(|(qid, q)| Ok((qid.clone(), cfg.render::<Error>(qid, q, &prefix, &mut tok)?)))
+            .collect::<Result<_, Error>>()?;
+        Ok((prefix, rendered))
     }
 
     /// Decode one renderer block: `ids[lo..hi]` at positions `pos0..` into sequence `seq`, with the
@@ -991,11 +1026,39 @@ impl LlamaModel {
             vocab,
             layout,
             settings: d.llama.clone(),
+            tokenizer: None,
             device,
             precision: d.gguf.quantization.clone(),
         };
         tracing::info!(model = %model.describe(), device = %model.device, layout = %d.layout, "loaded");
         Ok(model)
+    }
+
+    /// Attach the author's `tokenizer.json` (the package's tokenizer layer) to a jev-style model,
+    /// which renders with it as the author's runtime does: no BOS/EOS, special tokens in user text
+    /// split (never control tokens). The readout tokens must be single tokens there too.
+    pub fn load_tokenizer(&mut self, path: &Path) -> Result<(), Error> {
+        let Layout::JevStyle(cfg) = &self.layout else {
+            return Err(model_error(
+                "a tokenizer.json is only used by jev-style GGUF models",
+            ));
+        };
+        let mut tok = crate::onnx::load_tokenizer(path)?;
+        tok.set_encode_special_tokens(true);
+        for (text, id) in [(" yes", cfg.yes), (" no", cfg.no), (" ->", cfg.arrow)] {
+            let got = tok
+                .encode(text, false)
+                .map_err(|e| model_error(format!("{}: {e}", path.display())))?;
+            if got.get_ids() != [id] {
+                return Err(model_error(format!(
+                    "jev-style: {text:?} is {:?} in {}, decision.json says [{id}]",
+                    got.get_ids(),
+                    path.display()
+                )));
+            }
+        }
+        self.tokenizer = Some(tok);
+        Ok(())
     }
 
     /// Attach a matching GGUF projector. Text-only loads need no libmtmd.
